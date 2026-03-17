@@ -34,7 +34,7 @@ workspace/
 │   ├── Dockerfile              # base image + apt packages
 │   └── postCreate.sh           # runs inside container after build
 ├── host-setup.sh               # one-time host preparation
-├── secrets.env.enc             # sops+age encrypted env vars
+├── .gitignore                  # excludes decrypted secrets, .clipboard/, etc.
 ├── docs/
 │   └── manual.md               # usage manual
 └── CLAUDE.md
@@ -44,9 +44,10 @@ workspace/
 
 - **Dockerfile**: apt packages only. No npm/node/go — those come from devcontainer features. Includes: docker.io, XFCE4, KasmVNC, Chromium deps, media tools, tmux, mosh.
 - **devcontainer.json**: features (node, go, claude-code, github-cli, aws-cli, sshd), mounts (Docker socket, persistent storage), env vars from decrypted secrets. No desktop-lite feature.
-- **postCreate.sh**: TypeScript LSP, Terraform, ECS exec plugin, opencode, SSH authorized keys, tmux config, KasmVNC startup, sops+age secret decryption.
-- **host-setup.sh**: installs Docker, mounts EFS (AWS) or sets up persistent directory (VPS), installs chezmoi+age. Run once per new machine.
-- **secrets.env.enc**: sops-encrypted tokens (CLAUDE_CODE_OAUTH_TOKEN, GH_TOKEN, AWS creds). Safe to commit to git.
+- **postCreate.sh**: TypeScript LSP, Terraform, ECS exec plugin, opencode, SSH authorized keys, tmux config, KasmVNC startup.
+- **host-setup.sh**: installs Docker, mounts EFS (AWS) or sets up persistent directory (VPS), installs chezmoi+age, configures firewall. Run once per new machine.
+
+All secrets (CLAUDE_CODE_OAUTH_TOKEN, GH_TOKEN, AWS creds, SSH keys) are managed exclusively by chezmoi+age in a separate private dotfiles repo. No secrets in this workspace repo.
 
 ## Connection architecture
 
@@ -61,7 +62,7 @@ ssh -p 2222 user@remote-host
 
 ### Graphical desktop (browser debugging, watching dev-browser)
 
-SSH tunnel to KasmVNC, access via Mac browser.
+SSH tunnel to KasmVNC, access via Mac browser. KasmVNC port 8443 is mapped from the container to the host via Docker port mapping in devcontainer.json (`forwardPorts` or `appPort`), then tunneled to the Mac.
 
 ```
 ssh -L 8443:localhost:8443 remote-host
@@ -126,7 +127,16 @@ A private git repo managed by chezmoi stores all dotfiles and encrypted secrets:
 
 ### AWS-specific
 
-IAM instance profiles provide AWS credentials on EC2 — no tokens needed. Only non-AWS secrets (Claude token, GH token) go through sops+age.
+IAM instance profiles provide AWS credentials on EC2 — no tokens needed. Only non-AWS secrets (Claude token, GH token) go through chezmoi+age.
+
+## Security
+
+`host-setup.sh` configures host-level security:
+
+- **Firewall (ufw)**: only ports 22 (host SSH) and 2222 (container SSH) open. KasmVNC port 8443 bound to 127.0.0.1 only — accessible exclusively via SSH tunnel.
+- **fail2ban**: protects SSH against brute force.
+- **No root SSH**: `PermitRootLogin no` in sshd_config.
+- **Key-only auth**: `PasswordAuthentication no` for both host and container SSH.
 
 ## Persistent storage
 
@@ -140,7 +150,7 @@ IAM instance profiles provide AWS credentials on EC2 — no tokens needed. Only 
 - Project files and git repos
 - `.claude/` — memory, settings, session history
 - `.claude.json` — MCP server config
-- Chezmoi state
+Chezmoi state does not need explicit persistence — `chezmoi apply` is idempotent and re-runs on container rebuild.
 
 ### What's ephemeral (rebuilt from spec)
 
@@ -151,6 +161,14 @@ IAM instance profiles provide AWS credentials on EC2 — no tokens needed. Only 
 ### Mount point
 
 Persistent storage mounts at `/workspace` inside the container. All project work happens under this path.
+
+### Container user
+
+The devcontainer runs as user `vscode` (UID 1000) from the base image. On remote Linux hosts, the host user that owns the persistent storage must also be UID 1000, or `updateRemoteUserUID` in devcontainer.json must be set to remap. This avoids permission errors on bind mounts (unlike Docker Desktop on macOS, Linux does not transparently handle UID mismatches).
+
+### Backups
+
+Git is the backup for code. Claude state (`.claude/`) is useful but expendable — it can be rebuilt. EFS provides durability (replicated across AZs) but not protection against accidental deletion. VPS local disk has no redundancy. Backup strategy for persistent storage is out of scope for this project.
 
 ## Tech stack
 
@@ -171,11 +189,11 @@ Persistent storage mounts at `/workspace` inside the container. All project work
 |---|---|
 | docker.io | Docker socket passthrough for sibling containers |
 | xfce4, dbus-x11 | Desktop environment |
-| KasmVNC | VNC server with web client and clipboard sync |
+| KasmVNC (.deb from GitHub releases, pinned version) | VNC server with web client and clipboard sync |
 | libnss3, libgbm1, etc. | Chromium/Playwright dependencies |
 | ffmpeg, imagemagick, exiftool, webp, poppler-utils, ghostscript, qpdf | Media processing tools |
 | tmux | Terminal session management |
-| mosh | Roaming SSH alternative |
+| mosh | Roaming SSH alternative (for unreliable connections — survives IP changes, sleep/wake) |
 
 ### postCreate.sh installs
 
@@ -185,7 +203,7 @@ Persistent storage mounts at `/workspace` inside the container. All project work
 | terraform | AWS infrastructure provisioning |
 | session-manager-plugin | AWS ECS exec |
 | opencode | AI coding tool |
-| sops, age | Secret encryption/decryption |
+| age | Secret decryption (used by chezmoi) |
 
 ## DevPod workflow
 
