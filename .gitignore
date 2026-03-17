@@ -11,6 +11,12 @@
 .DS_Store
 Thumbs.db
 
+# Claude config (local per-machine state)
+.claude/
+
+# Temporary reference materials
+docs/Cloud-based working environment.md
+
 # Editor state
 *.swp
 *.swo
