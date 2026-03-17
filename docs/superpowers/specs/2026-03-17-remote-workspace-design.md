@@ -44,7 +44,8 @@ workspace/
 
 - **Dockerfile**: apt packages only. No npm/node/go — those come from devcontainer features. Includes: docker.io, XFCE4, KasmVNC, Chromium deps, media tools, tmux, mosh.
 - **devcontainer.json**: features (node, go, claude-code, github-cli, aws-cli, sshd), mounts (Docker socket, persistent storage), env vars from decrypted secrets. No desktop-lite feature.
-- **postCreate.sh**: TypeScript LSP, Terraform, ECS exec plugin, opencode, SSH authorized keys, tmux config, KasmVNC startup.
+- **postCreate.sh**: TypeScript LSP, Terraform, ECS exec plugin, opencode, SSH authorized keys, tmux config, KasmVNC password and config setup.
+- **postStartCommand** (in devcontainer.json): starts KasmVNC server on every container start (not in postCreate.sh which only runs once).
 - **host-setup.sh**: installs Docker, mounts EFS (AWS) or sets up persistent directory (VPS), installs chezmoi+age, configures firewall. Run once per new machine.
 
 All secrets (CLAUDE_CODE_OAUTH_TOKEN, GH_TOKEN, AWS creds, SSH keys) are managed exclusively by chezmoi+age in a separate private dotfiles repo. No secrets in this workspace repo.
