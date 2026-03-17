@@ -32,5 +32,6 @@
   "remoteUser": "vscode",
   "updateRemoteUserUID": true,
 
-  "postCreateCommand": "bash -l .devcontainer/postCreate.sh"
+  "postCreateCommand": "bash -l .devcontainer/postCreate.sh",
+  "postStartCommand": "kasmvncserver :1 -geometry 1920x1080 -depth 24 -websocketPort 8443 2>/dev/null || true"
 }

@@ -30,7 +30,6 @@ rm /tmp/session-manager-plugin.deb
 
 # ─── opencode ────────────────────────────────────────────────────────────────
 echo "==> Installing opencode"
-# TODO: verify the exact import path for opencode-ai/opencode before use
 go install github.com/opencode-ai/opencode@latest
 
 # ─── age ─────────────────────────────────────────────────────────────────────
@@ -57,7 +56,6 @@ mkdir -p ~/.vnc
 cp "$(dirname "$0")/kasmvnc.yaml" ~/.vnc/kasmvnc.yaml
 cp "$(dirname "$0")/xstartup.sh" ~/.vnc/xstartup.sh
 chmod +x ~/.vnc/xstartup.sh
-# NOTE: kasmvncpasswd syntax may differ across versions; verify against installed docs
 echo -e "vscode\nvscode\n" | kasmvncpasswd -u vscode -w
 
 # ─── tmux config ─────────────────────────────────────────────────────────────
@@ -83,12 +81,5 @@ set -sg escape-time 10
 # Mouse support
 set -g mouse on
 EOF
-
-# ─── Start KasmVNC ───────────────────────────────────────────────────────────
-# NOTE: Starting the server here runs once at container creation.
-# Consider moving to postStartCommand in devcontainer.json so it restarts
-# on every container start (postCreate only runs on initial build).
-echo "==> Starting KasmVNC"
-kasmvncserver :1 -geometry 1920x1080 -depth 24 -websocketPort 8443 || true
 
 echo "==> postCreate.sh complete"
