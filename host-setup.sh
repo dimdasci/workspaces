@@ -66,7 +66,7 @@ if [ -x /usr/local/bin/chezmoi ]; then
     echo "  chezmoi already installed at /usr/local/bin/chezmoi, skipping"
 else
     echo "  installing chezmoi to /usr/local/bin ..."
-    sh -c "$(curl -fsSL https://get.chezmoi.io)" -- -b /usr/local/bin
+    sudo sh -c "$(curl -fsSL https://get.chezmoi.io)" -- -b /usr/local/bin
 fi
 
 # -----------------------------------------------------------------------------
