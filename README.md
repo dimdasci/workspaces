@@ -9,10 +9,10 @@ Devcontainer deployed via DevPod on remote Ubuntu machines. Terminal-first with 
 ## Quick start
 
 1. **Prerequisites:** DevPod installed on Mac, Ubuntu 22.04+ remote machine with SSH access
-2. **Prepare host:** `ssh user@host 'curl -sSL https://raw.githubusercontent.com/dimdasci/workspaces/main/scripts/host-setup.sh | bash'`
-3. **Deploy:** `devpod up . --provider ssh --option HOST=host`
+2. **Prepare host:** `ssh user@host 'curl -sSL https://raw.githubusercontent.com/dimdasci/workspaces/main/host-setup.sh | bash'`
+3. **Deploy:** `devpod up ./workspace --provider ssh --option HOST=host`
 4. **Connect:** `devpod ssh workspace`
-5. **Browser desktop:** `ssh -L 8443:localhost:8443 host` then open `https://localhost:8443`
+5. **Browser desktop:** `ssh -L 8443:localhost:8443 host` then open `http://localhost:8443`
 
 ## What's inside
 

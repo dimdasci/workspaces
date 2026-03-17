@@ -65,7 +65,7 @@ tmux attaches automatically on login. Pane splitting and session persistence wor
 ssh -L 8443:localhost:8443 my-ec2
 ```
 
-Open `https://localhost:8443` in your browser (accept the self-signed cert). Password: `vscode`. XFCE desktop with Chromium in the app menu.
+Open `http://localhost:8443` in your browser. Password: `vscode`. XFCE desktop with Chromium in the app menu.
 
 KasmVNC requires HTTPS or localhost — the SSH tunnel provides this. Do not expose port 8443 directly.
 
@@ -208,5 +208,5 @@ kasmvncserver :1 -select-de xfce -depth 24 -geometry 1920x1080
 
 The browser Clipboard API requires HTTPS or `localhost`. Verify:
 1. SSH tunnel is active (`ssh -L 8443:localhost:8443 my-ec2`)
-2. You're accessing `https://localhost:8443` (not `http://` and not the remote IP directly)
+2. You're accessing `http://localhost:8443` via SSH tunnel (not the remote IP directly)
 3. Browser has granted clipboard permissions to the page
