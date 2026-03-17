@@ -1,0 +1,16 @@
+desktop:
+  resolution:
+    width: 1920
+    height: 1080
+  clipboard:
+    allow_clipboard_down: true
+    allow_clipboard_up: true
+
+network:
+  protocol: http
+  websocket_port: 8443
+  ssl:
+    require_ssl: false
+
+logging:
+  level: 30
