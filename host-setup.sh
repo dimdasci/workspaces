@@ -153,8 +153,9 @@ apply_sshd_setting() {
 apply_sshd_setting PermitRootLogin no
 apply_sshd_setting PasswordAuthentication no
 
-echo "  restarting sshd ..."
-sudo systemctl restart sshd
+echo "  restarting ssh ..."
+# Ubuntu 24.04+ uses ssh.service; older versions use sshd.service
+sudo systemctl restart ssh 2>/dev/null || sudo systemctl restart sshd
 
 # -----------------------------------------------------------------------------
 # Done
