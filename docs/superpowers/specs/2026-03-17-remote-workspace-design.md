@@ -219,8 +219,8 @@ devpod provider add ssh
 # Prepare remote host (run once per new machine)
 ssh user@my-ec2 'curl -sSL https://raw.githubusercontent.com/<repo>/main/host-setup.sh | bash'
 
-# Copy age key to remote host
-scp ~/.age/key.txt user@my-ec2:~/.config/sops/age/keys.txt
+# Copy age key to remote host (path must match chezmoi.toml [age].identity)
+scp ~/.age/key.txt user@my-ec2:~/.config/chezmoi/key.txt
 
 # Bootstrap chezmoi on remote host
 ssh user@my-ec2 'sh -c "$(curl -fsLS get.chezmoi.io)" -- init --apply <github-username>'
