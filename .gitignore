@@ -1,0 +1,17 @@
+# Decrypted secrets
+*.dec
+*.decrypted
+.env
+.env.local
+
+# Clipboard transfer directory
+.clipboard/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Editor state
+*.swp
+*.swo
+*~
