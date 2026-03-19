@@ -56,6 +56,7 @@ cp "$(dirname "$0")/kasmvnc.yaml" ~/.vnc/kasmvnc.yaml
 cp "$(dirname "$0")/xstartup.sh" ~/.vnc/xstartup.sh
 chmod +x ~/.vnc/xstartup.sh
 echo -e "vscode\nvscode\n" | kasmvncpasswd -u vscode -w
+touch ~/.vnc/.de-was-selected
 
 # ─── tmux config ─────────────────────────────────────────────────────────────
 echo "==> Writing tmux config"
