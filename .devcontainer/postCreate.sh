@@ -57,6 +57,9 @@ cp "$(dirname "$0")/xstartup.sh" ~/.vnc/xstartup.sh
 chmod +x ~/.vnc/xstartup.sh
 echo -e "vscode\nvscode\n" | kasmvncpasswd -u vscode -w
 touch ~/.vnc/.de-was-selected
+openssl req -x509 -nodes -days 3650 -newkey rsa:2048 \
+    -keyout ~/.vnc/self.key -out ~/.vnc/self.crt \
+    -subj "/CN=localhost" 2>/dev/null
 
 # ─── tmux config ─────────────────────────────────────────────────────────────
 echo "==> Writing tmux config"
