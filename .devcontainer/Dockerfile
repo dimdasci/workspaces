@@ -36,6 +36,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     age \
     # Browser (for gh auth, OAuth flows in KasmVNC desktop)
     chromium \
+    # KasmVNC Perl dependency
+    libdatetime-perl \
     # Terminal tools
     tmux \
     mosh \
