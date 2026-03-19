@@ -32,6 +32,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ghostscript \
     qpdf \
     jq \
+    unzip \
+    age \
     # Terminal tools
     tmux \
     mosh \

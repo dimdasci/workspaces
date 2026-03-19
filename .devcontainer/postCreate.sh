@@ -1,58 +1,17 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# ─── TypeScript language server ──────────────────────────────────────────────
-echo "==> Installing TypeScript language server"
-npm install -g typescript typescript-language-server
-
-# ─── Terraform ───────────────────────────────────────────────────────────────
-echo "==> Installing Terraform"
-ARCH="$(dpkg --print-architecture)"
-TF_VERSION="$(curl -fsSL https://checkpoint-api.hashicorp.com/v1/check/terraform | python3 -c 'import sys,json; print(json.load(sys.stdin)["current_version"])')"
-TF_URL="https://releases.hashicorp.com/terraform/${TF_VERSION}/terraform_${TF_VERSION}_linux_${ARCH}.zip"
-curl -fsSL "$TF_URL" -o /tmp/terraform.zip
-unzip -o /tmp/terraform.zip -d /tmp/terraform-bin
-sudo mv /tmp/terraform-bin/terraform /usr/local/bin/terraform
-sudo chmod +x /usr/local/bin/terraform
-rm -rf /tmp/terraform.zip /tmp/terraform-bin
-
-# ─── AWS Session Manager plugin ──────────────────────────────────────────────
-echo "==> Installing AWS Session Manager plugin"
-ARCH="$(dpkg --print-architecture)"
-if [ "$ARCH" = "arm64" ]; then
-    SSM_URL="https://s3.amazonaws.com/session-manager-downloads/plugin/latest/ubuntu_arm64/session-manager-plugin.deb"
-else
-    SSM_URL="https://s3.amazonaws.com/session-manager-downloads/plugin/latest/ubuntu_64bit/session-manager-plugin.deb"
-fi
-curl -fsSL "$SSM_URL" -o /tmp/session-manager-plugin.deb
-sudo dpkg -i /tmp/session-manager-plugin.deb
-rm /tmp/session-manager-plugin.deb
-
-# ─── opencode ────────────────────────────────────────────────────────────────
-echo "==> Installing opencode"
-go install github.com/opencode-ai/opencode@latest
-
-# ─── age ─────────────────────────────────────────────────────────────────────
-echo "==> Installing age"
-sudo apt-get update
-sudo apt-get install -y age
-sudo rm -rf /var/lib/apt/lists/*
+# =============================================================================
+# Local operations first (no network, guaranteed to succeed)
+# =============================================================================
 
 # ─── SSH authorized keys ──────────────────────────────────────────────────────
 echo "==> Setting up SSH authorized keys"
 mkdir -p ~/.ssh && chmod 700 ~/.ssh
 if [ -f /tmp/host_authorized_keys ]; then
-    cat /tmp/host_authorized_keys >> ~/.ssh/authorized_keys
+    cp /tmp/host_authorized_keys ~/.ssh/authorized_keys
     chmod 600 ~/.ssh/authorized_keys
 fi
-
-# ─── Claude Code ─────────────────────────────────────────────────────────────
-# Installed via devcontainer feature (npm). Run the official installer to get
-# the native binary + shell integration. WORKDIR must not be / or it hangs
-# scanning the filesystem (per docs).
-echo "==> Installing Claude Code native binary"
-cd /tmp && curl -fsSL https://claude.ai/install.sh | bash
-cd -
 
 # ─── KasmVNC setup ───────────────────────────────────────────────────────────
 echo "==> Setting up KasmVNC"
@@ -85,5 +44,52 @@ set -sg escape-time 10
 # Mouse support
 set -g mouse on
 EOF
+
+# =============================================================================
+# Network-dependent installs (each wrapped so one failure doesn't kill the rest)
+# =============================================================================
+
+install_or_warn() {
+    local name="$1"; shift
+    echo "==> Installing $name"
+    if ! "$@"; then
+        echo "WARN: $name installation failed (non-fatal)"
+    fi
+}
+
+# ─── TypeScript language server ──────────────────────────────────────────────
+install_or_warn "TypeScript language server" npm install -g typescript typescript-language-server
+
+# ─── Terraform ───────────────────────────────────────────────────────────────
+install_terraform() {
+    local arch tf_version tf_url
+    arch="$(dpkg --print-architecture)"
+    tf_version="$(curl -fsSL https://checkpoint-api.hashicorp.com/v1/check/terraform | jq -r '.current_version')"
+    tf_url="https://releases.hashicorp.com/terraform/${tf_version}/terraform_${tf_version}_linux_${arch}.zip"
+    curl -fsSL "$tf_url" -o /tmp/terraform.zip
+    unzip -o /tmp/terraform.zip -d /tmp/terraform-bin
+    sudo mv /tmp/terraform-bin/terraform /usr/local/bin/terraform
+    sudo chmod +x /usr/local/bin/terraform
+    rm -rf /tmp/terraform.zip /tmp/terraform-bin
+}
+install_or_warn "Terraform" install_terraform
+
+# ─── AWS Session Manager plugin ──────────────────────────────────────────────
+install_ssm() {
+    local arch ssm_url
+    arch="$(dpkg --print-architecture)"
+    if [ "$arch" = "arm64" ]; then
+        ssm_url="https://s3.amazonaws.com/session-manager-downloads/plugin/latest/ubuntu_arm64/session-manager-plugin.deb"
+    else
+        ssm_url="https://s3.amazonaws.com/session-manager-downloads/plugin/latest/ubuntu_64bit/session-manager-plugin.deb"
+    fi
+    curl -fsSL "$ssm_url" -o /tmp/session-manager-plugin.deb
+    sudo dpkg -i /tmp/session-manager-plugin.deb
+    rm /tmp/session-manager-plugin.deb
+}
+install_or_warn "AWS Session Manager plugin" install_ssm
+
+# ─── opencode ────────────────────────────────────────────────────────────────
+install_or_warn "opencode" go install github.com/opencode-ai/opencode@latest
 
 echo "==> postCreate.sh complete"
