@@ -5,13 +5,20 @@ set -euo pipefail
 # Local operations first (no network, guaranteed to succeed)
 # =============================================================================
 
-# ─── Persist config dirs on /workspace (survives rebuilds) ───────────────────
+# ─── Persist config on /workspace (survives rebuilds) ────────────────────────
 echo "==> Setting up persistent config symlinks"
 for dir in gh opencode; do
     mkdir -p "/workspace/.config/${dir}"
     rm -rf "${HOME}/.config/${dir}"
     ln -sf "/workspace/.config/${dir}" "${HOME}/.config/${dir}"
 done
+
+# Git config — always symlink so git config --global writes to /workspace
+touch /workspace/.gitconfig
+ln -sf /workspace/.gitconfig "${HOME}/.gitconfig"
+if ! git config --global user.name &>/dev/null; then
+    echo "NOTE: git user not configured. Run: git config --global user.name 'Your Name' && git config --global user.email 'you@example.com'"
+fi
 
 # ─── Chromium no-sandbox wrapper (required in containers) ────────────────────
 echo "==> Configuring Chromium for container use"
