@@ -69,8 +69,15 @@ fi
 if [ -n "$EFS_ID" ]; then
     # Install EFS utils if needed
     if ! command -v mount.efs &>/dev/null; then
-        echo "  installing amazon-efs-utils ..."
-        sudo apt-get install -y amazon-efs-utils
+        echo "  installing amazon-efs-utils from source ..."
+        sudo apt-get update
+        sudo apt-get install -y git binutils rustc cargo pkg-config libssl-dev
+        git clone https://github.com/aws/efs-utils /tmp/efs-utils
+        cd /tmp/efs-utils
+        ./build-deb.sh
+        sudo apt-get install -y ./build/amazon-efs-utils*deb
+        cd -
+        rm -rf /tmp/efs-utils
     fi
 
     FSTAB_ENTRY="${EFS_ID}.efs.${AWS_REGION}.amazonaws.com:/ /workspace efs _netdev,tls 0 0"
