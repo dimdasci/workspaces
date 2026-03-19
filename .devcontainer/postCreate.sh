@@ -48,7 +48,7 @@ fi
 
 # ─── Claude Code shell integration ───────────────────────────────────────────
 echo "==> Installing Claude Code shell integration"
-claude install 2>/dev/null || true
+timeout 30 claude install 2>/dev/null || true
 
 # ─── KasmVNC setup ───────────────────────────────────────────────────────────
 echo "==> Setting up KasmVNC"
