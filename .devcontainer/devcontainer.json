@@ -5,7 +5,8 @@
   },
 
   "runArgs": [
-    "--shm-size=2g"
+    "--memory=${localEnv:WORKSPACE_MEMORY:12g}",
+    "--shm-size=${localEnv:WORKSPACE_SHM:2g}"
   ],
 
   "features": {
