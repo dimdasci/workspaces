@@ -5,6 +5,14 @@ set -euo pipefail
 # Local operations first (no network, guaranteed to succeed)
 # =============================================================================
 
+# ─── Fix Docker socket permissions (host GID may differ from container) ──────
+echo "==> Fixing Docker socket permissions"
+if [ -S /var/run/docker.sock ]; then
+    DOCKER_GID=$(stat -c '%g' /var/run/docker.sock)
+    sudo groupmod -g "$DOCKER_GID" docker 2>/dev/null || true
+    sudo usermod -aG docker "$(whoami)" 2>/dev/null || true
+fi
+
 # ─── Ensure /workspace is writable (EFS root may be owned by root) ───────────
 echo "==> Checking /workspace permissions"
 if [ ! -w /workspace ]; then
