@@ -15,8 +15,9 @@ Standardized remote dev environment for VPS/EC2. Devcontainer deployed via DevPo
 
 **Mac:**
 ```bash
-brew install devpod pngpaste
+brew install devpod pngpaste age
 ssh-keygen -t ed25519  # if you don't have a key
+age-keygen -o ~/.age/key.txt  # encryption key for chezmoi secrets
 
 # One-time: disable DevPod bulk-loading all SSH keys into agent
 devpod context set-options -o SSH_ADD_PRIVATE_KEYS=false
