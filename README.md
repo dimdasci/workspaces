@@ -17,6 +17,10 @@ Standardized remote dev environment for VPS/EC2. Devcontainer deployed via DevPo
 ```bash
 brew install devpod pngpaste
 ssh-keygen -t ed25519  # if you don't have a key
+
+# One-time: disable DevPod bulk-loading all SSH keys into agent
+devpod context set-options -o SSH_ADD_PRIVATE_KEYS=false
+devpod context set-options -o AGENT_INJECT_TIMEOUT=60
 ```
 
 **Remote machine:** Ubuntu 22.04+ with SSH access and sudo. Minimum 4 GB RAM / 2 vCPU. 8 GB+ recommended for headed Chromium.
@@ -47,15 +51,19 @@ ssh ws-ec2
 
 ### 2. Run host setup
 
-On the remote machine (installs Docker, firewall, fail2ban, chezmoi, age):
+On the remote machine (installs Docker, firewall, fail2ban, chezmoi, age, EFS):
 
 ```bash
+# VPS (local disk for /workspace)
 ssh ws-ec2 'curl -sSL https://raw.githubusercontent.com/dimdasci/workspaces/main/host-setup.sh | bash'
+
+# AWS EC2 (EFS for /workspace — survives instance termination)
+ssh ws-ec2 'curl -sSL https://raw.githubusercontent.com/dimdasci/workspaces/main/host-setup.sh | bash -s -- --efs fs-xxx us-east-1'
 ```
 
 The script is idempotent — safe to re-run. It configures:
 - Docker engine + adds your user to docker group
-- `/workspace` directory (persistent storage mount point)
+- `/workspace` directory — EFS mount (AWS) or local disk (VPS)
 - ufw firewall: ports 22, 2222 open; everything else blocked
 - fail2ban for SSH brute force protection
 - SSH hardening: key-only auth, no root login
@@ -73,16 +81,20 @@ ssh ws-ec2 'chezmoi init --apply <your-github-username>'
 
 ### 4. Add DevPod SSH provider
 
+One provider per remote machine. Name it to match the host:
+
 ```bash
-devpod provider add ssh \
-  --option HOST=ubuntu@<public-ip> \
-  --option EXTRA_FLAGS="-i ~/.ssh/<key-name>.pem"
+devpod provider add ssh --name <ws-name> \
+  -o HOST=ubuntu@<public-ip> \
+  -o EXTRA_FLAGS="-o IdentitiesOnly=yes -i ~/.ssh/<key-name>.pem"
 ```
 
 ### 5. Deploy the workspace
 
+Use `--id` matching the provider name so everything stays consistent:
+
 ```bash
-devpod up github.com/dimdasci/workspaces --provider ssh --ide none
+devpod up github.com/dimdasci/workspaces --provider <ws-name> --id <ws-name> --ide none
 ```
 
 First build takes several minutes (downloads base image, installs XFCE, KasmVNC, all tools). Subsequent rebuilds use Docker cache.
@@ -91,14 +103,14 @@ First build takes several minutes (downloads base image, installs XFCE, KasmVNC,
 
 **Terminal (primary):**
 ```bash
-devpod ssh workspaces
+ssh <ws-name>.devpod
 ```
 
 tmux starts automatically. `Ctrl+B %` splits vertically, `Ctrl+B "` splits horizontally, `Ctrl+B <arrow>` switches panes. If SSH drops, reconnect and `tmux attach` — session is preserved.
 
 **Graphical desktop (separate Mac terminal):**
 ```bash
-ssh -L 8443:localhost:8443 ws-ec2
+ssh -L 8443:localhost:8443 -o IdentitiesOnly=yes -i ~/.ssh/<key-name>.pem ubuntu@<public-ip>
 ```
 Then open `http://localhost:8443` in your browser. Password: `vscode`. XFCE desktop with Chromium in the app menu.
 
@@ -122,28 +134,35 @@ Copy image to clipboard, run `ws1-img`, pass the printed path to Claude.
 ## Mac shell aliases
 
 ```bash
-# Add to ~/.zshrc
-alias ws1='devpod ssh workspaces'
-alias ws1-vnc='ssh -L 8443:localhost:8443 ws-ec2'
-alias ws1-img='f=$(date +%Y%m%d-%H%M%S).png; pngpaste /tmp/$f && scp -P 2222 /tmp/$f vscode@ws-ec2:/workspace/.clipboard/$f && echo "/workspace/.clipboard/$f"'
+# Add to ~/.zshrc — one set per workspace
+alias ws1='ssh ec2-ws.devpod'
+alias ws1-vnc='ssh -L 8443:localhost:8443 -o IdentitiesOnly=yes -i ~/.ssh/claude-ws.pem ubuntu@<public-ip>'
+alias ws1-img='f=$(date +%Y%m%d-%H%M%S).png; pngpaste /tmp/$f && scp -P 2222 /tmp/$f vscode@<public-ip>:/workspace/.clipboard/$f && echo "/workspace/.clipboard/$f"'
 ```
 
 ## Multiple workspaces
 
-```bash
-devpod up github.com/dimdasci/workspaces --provider ssh --id work-2
-# (configure provider with different HOST for a different machine)
+Each remote machine gets its own provider and workspace ID:
 
-devpod ssh workspaces   # first workspace
-devpod ssh work-2       # second workspace
+```bash
+# Add second machine
+devpod provider add ssh --name contabo-ws \
+  -o HOST=ubuntu@<other-ip> \
+  -o EXTRA_FLAGS="-o IdentitiesOnly=yes -i ~/.ssh/<other-key>.pem"
+
+devpod up github.com/dimdasci/workspaces --provider contabo-ws --id contabo-ws --ide none
+
+# Connect
+ssh ec2-ws.devpod       # first workspace
+ssh contabo-ws.devpod   # second workspace
 ```
 
 ## Destroy and recreate
 
 ```bash
-devpod delete workspaces
+devpod delete <ws-name>
 # /workspace on the host is NOT deleted — all project files survive
-devpod up github.com/dimdasci/workspaces --provider ssh --ide none
+devpod up github.com/dimdasci/workspaces --provider <ws-name> --id <ws-name> --ide none
 ```
 
 ## Persistent storage
@@ -153,12 +172,7 @@ devpod up github.com/dimdasci/workspaces --provider ssh --ide none
 | Project files, git repos, .claude/ | `/workspace` on host | Survives container rebuild |
 | Container, tools, caches | Inside container | Rebuilt from Dockerfile |
 
-**AWS EFS** (optional, for data that survives instance termination):
-```bash
-sudo apt-get install -y amazon-efs-utils
-# Add to /etc/fstab before running host-setup.sh:
-# fs-xxx.efs.region.amazonaws.com:/ /workspace efs _netdev,tls 0 0
-```
+**AWS EC2:** EFS is required. Pass `--efs` to `host-setup.sh` (see step 2). Data survives instance termination.
 
 **VPS:** local disk at `/workspace`, persistent as long as the VPS exists.
 
@@ -169,6 +183,12 @@ sudo apt-get install -y amazon-efs-utils
 - Secrets: chezmoi + age in a separate private repo, never in this repo
 
 ## Troubleshooting
+
+**"Too many authentication failures" or agent injection timeout:**
+DevPod bulk-loads all `~/.ssh/` keys into the SSH agent by default. Fix: `devpod context set-options -o SSH_ADD_PRIVATE_KEYS=false` and ensure your provider has `-o IdentitiesOnly=yes -i <key>` in EXTRA_FLAGS.
+
+**EC2 IP changed after stop/start:**
+Allocate an Elastic IP and associate it with the instance. Then update the provider: `devpod provider set-options <ws-name> -o HOST=ubuntu@<new-ip>`
 
 **SSH host key changed after rebuild:**
 ```bash

@@ -4,15 +4,36 @@ set -euo pipefail
 # =============================================================================
 # host-setup.sh — one-time remote host preparation
 # Ubuntu 22.04+ | run as regular user with sudo
+#
+# Usage:
+#   bash host-setup.sh                          # VPS (local disk)
+#   bash host-setup.sh --efs fs-xxx us-east-1   # AWS EC2 (EFS)
 # =============================================================================
 
 BANNER="==================================================================="
+
+# Parse arguments
+EFS_ID=""
+AWS_REGION=""
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --efs)
+            EFS_ID="$2"
+            AWS_REGION="${3:?'AWS region required after EFS ID, e.g.: --efs fs-xxx us-east-1'}"
+            shift 3
+            ;;
+        *)
+            echo "Unknown option: $1" >&2
+            exit 1
+            ;;
+    esac
+done
 
 # -----------------------------------------------------------------------------
 # 1. Docker
 # -----------------------------------------------------------------------------
 echo "$BANNER"
-echo ">>> [1/7] Docker"
+echo ">>> [1/8] Docker"
 echo "$BANNER"
 
 if command -v docker &>/dev/null; then
@@ -35,7 +56,7 @@ fi
 # 2. Persistent storage
 # -----------------------------------------------------------------------------
 echo "$BANNER"
-echo ">>> [2/7] Persistent storage (/workspace)"
+echo ">>> [2/8] Persistent storage (/workspace)"
 echo "$BANNER"
 
 if [ -d /workspace ]; then
@@ -45,11 +66,27 @@ else
     sudo mkdir -p /workspace
 fi
 
+if [ -n "$EFS_ID" ]; then
+    # Install EFS utils if needed
+    if ! command -v mount.efs &>/dev/null; then
+        echo "  installing amazon-efs-utils ..."
+        sudo apt-get install -y amazon-efs-utils
+    fi
+
+    FSTAB_ENTRY="${EFS_ID}.efs.${AWS_REGION}.amazonaws.com:/ /workspace efs _netdev,tls 0 0"
+    if grep -qsE '\s/workspace\s' /etc/fstab; then
+        echo "  /workspace already in /etc/fstab, updating ..."
+        sudo sed -i '\| /workspace |d' /etc/fstab
+    fi
+    echo "$FSTAB_ENTRY" | sudo tee -a /etc/fstab >/dev/null
+    echo "  added fstab entry: $FSTAB_ENTRY"
+fi
+
 if grep -qsE '\s/workspace\s' /etc/fstab; then
-    echo "  /workspace found in /etc/fstab (EFS), mounting ..."
+    echo "  mounting /workspace from fstab ..."
     sudo mount /workspace || echo "  mount returned non-zero (may already be mounted)"
 else
-    echo "  /workspace not in /etc/fstab, skipping mount"
+    echo "  no fstab entry for /workspace, using local disk"
 fi
 
 echo "  setting ownership of /workspace to UID 1000 ..."
@@ -59,7 +96,7 @@ sudo chown -R 1000:1000 /workspace
 # 3. chezmoi
 # -----------------------------------------------------------------------------
 echo "$BANNER"
-echo ">>> [3/7] chezmoi"
+echo ">>> [3/8] chezmoi"
 echo "$BANNER"
 
 if [ -x /usr/local/bin/chezmoi ]; then
@@ -73,7 +110,7 @@ fi
 # 4. age
 # -----------------------------------------------------------------------------
 echo "$BANNER"
-echo ">>> [4/7] age"
+echo ">>> [4/8] age"
 echo "$BANNER"
 
 if command -v age &>/dev/null; then
@@ -87,7 +124,7 @@ fi
 # 5. Firewall (ufw)
 # -----------------------------------------------------------------------------
 echo "$BANNER"
-echo ">>> [5/7] Firewall (ufw)"
+echo ">>> [5/8] Firewall (ufw)"
 echo "$BANNER"
 
 if ! command -v ufw &>/dev/null; then
@@ -112,7 +149,7 @@ sudo ufw status verbose
 # 6. fail2ban
 # -----------------------------------------------------------------------------
 echo "$BANNER"
-echo ">>> [6/7] fail2ban"
+echo ">>> [6/8] fail2ban"
 echo "$BANNER"
 
 if command -v fail2ban-server &>/dev/null; then
@@ -130,7 +167,7 @@ sudo systemctl start fail2ban
 # 7. SSH hardening
 # -----------------------------------------------------------------------------
 echo "$BANNER"
-echo ">>> [7/7] SSH hardening"
+echo ">>> [7/8] SSH hardening"
 echo "$BANNER"
 
 SSHD_CONF=/etc/ssh/sshd_config
@@ -158,6 +195,21 @@ echo "  restarting ssh ..."
 sudo systemctl restart ssh 2>/dev/null || sudo systemctl restart sshd
 
 # -----------------------------------------------------------------------------
+# 8. Elastic IP reminder (AWS only)
+# -----------------------------------------------------------------------------
+echo "$BANNER"
+echo ">>> [8/8] Elastic IP check"
+echo "$BANNER"
+
+if [ -n "$EFS_ID" ]; then
+    echo "  AWS detected (EFS configured)."
+    echo "  Ensure an Elastic IP is associated with this instance"
+    echo "  to keep a stable address across stop/start cycles."
+else
+    echo "  Non-AWS setup, skipping Elastic IP check."
+fi
+
+# -----------------------------------------------------------------------------
 # Done
 # -----------------------------------------------------------------------------
 echo "$BANNER"
@@ -167,5 +219,5 @@ echo ""
 echo "Next steps:"
 echo "  1. Copy your age key:  scp ~/.age/key.txt user@host:~/.config/chezmoi/key.txt"
 echo "  2. Bootstrap chezmoi:  chezmoi init --apply <your-github-username>"
-echo "  3. Deploy workspace:   devpod up ./workspace --provider ssh --option HOST=<this-host>"
+echo "  3. Deploy workspace:   devpod up github.com/<user>/workspaces --provider <ws-name> --id <ws-name> --ide none"
 echo ""
