@@ -46,9 +46,13 @@ if [ -f /tmp/host_authorized_keys ]; then
     chmod 600 ~/.ssh/authorized_keys
 fi
 
-# ─── Claude Code shell integration ───────────────────────────────────────────
-echo "==> Installing Claude Code shell integration"
-timeout 30 claude install 2>/dev/null || true
+# ─── Claude Code ─────────────────────────────────────────────────────────────
+# Installed via devcontainer feature (npm). Run the official installer to get
+# the native binary + shell integration. WORKDIR must not be / or it hangs
+# scanning the filesystem (per docs).
+echo "==> Installing Claude Code native binary"
+cd /tmp && curl -fsSL https://claude.ai/install.sh | bash
+cd -
 
 # ─── KasmVNC setup ───────────────────────────────────────────────────────────
 echo "==> Setting up KasmVNC"
