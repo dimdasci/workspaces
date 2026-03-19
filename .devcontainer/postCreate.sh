@@ -5,6 +5,12 @@ set -euo pipefail
 # Local operations first (no network, guaranteed to succeed)
 # =============================================================================
 
+# ─── Ensure /workspace is writable (EFS root may be owned by root) ───────────
+echo "==> Checking /workspace permissions"
+if [ ! -w /workspace ]; then
+    sudo chown -R "$(id -u):$(id -g)" /workspace
+fi
+
 # ─── Persist config on /workspace (survives rebuilds) ────────────────────────
 echo "==> Setting up persistent config symlinks"
 for dir in gh opencode; do
