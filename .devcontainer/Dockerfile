@@ -34,6 +34,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     jq \
     unzip \
     age \
+    # Browser (for gh auth, OAuth flows in KasmVNC desktop)
+    chromium \
     # Terminal tools
     tmux \
     mosh \
