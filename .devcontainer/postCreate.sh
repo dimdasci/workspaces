@@ -5,6 +5,21 @@ set -euo pipefail
 # Local operations first (no network, guaranteed to succeed)
 # =============================================================================
 
+# ─── Persist config dirs on /workspace (survives rebuilds) ───────────────────
+echo "==> Setting up persistent config symlinks"
+for dir in gh opencode; do
+    mkdir -p "/workspace/.config/${dir}"
+    rm -rf "${HOME}/.config/${dir}"
+    ln -sf "/workspace/.config/${dir}" "${HOME}/.config/${dir}"
+done
+
+# ─── Chromium no-sandbox wrapper (required in containers) ────────────────────
+echo "==> Configuring Chromium for container use"
+sudo mkdir -p /etc/chromium
+echo '{"CommandLineFlagSecurityWarningsEnabled": false}' | sudo tee /etc/chromium/policies/managed/container.json >/dev/null 2>&1 || true
+# Set default flags for Chromium launched from desktop
+sudo sed -i 's|^Exec=chromium|Exec=chromium --no-sandbox|' /usr/share/applications/chromium.desktop 2>/dev/null || true
+
 # ─── SSH authorized keys ──────────────────────────────────────────────────────
 echo "==> Setting up SSH authorized keys"
 mkdir -p ~/.ssh && chmod 700 ~/.ssh
