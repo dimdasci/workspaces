@@ -7,7 +7,7 @@ Standardized remote dev environment for VPS/EC2. Devcontainer deployed via DevPo
 - **Runtimes:** Node.js/pnpm, Go
 - **AI/Dev tools:** Claude Code, opencode
 - **Cloud/Infra:** GitHub CLI, AWS CLI, Terraform, AWS Session Manager plugin
-- **Desktop:** XFCE + KasmVNC (bidirectional clipboard, text + images)
+- **Desktop:** XFCE + KasmVNC + Chromium (bidirectional clipboard, text + images)
 - **Shell:** tmux (session persistence, OSC-52 clipboard), mosh
 - **Media:** ffmpeg, imagemagick, exiftool, poppler-utils, ghostscript, qpdf
 
@@ -26,7 +26,7 @@ devpod context set-options -o AGENT_INJECT_TIMEOUT=60
 
 **Remote machine:** Ubuntu 22.04+ with SSH access and sudo. Minimum 4 GB RAM / 2 vCPU. 8 GB+ recommended for headed Chromium.
 
-**AWS EC2 example:** Ubuntu 24.04 AMI, t4g.xlarge (arm64, 4 vCPU, 16 GB), 32 GB gp3 EBS, security group allowing SSH (port 22) only.
+**AWS EC2 example:** Ubuntu 24.04 AMI, t4g.xlarge (arm64, 4 vCPU, 16 GB), 32 GB gp3 EBS, security group allowing SSH (port 22) only. Allocate an Elastic IP so the address survives stop/start. Create an EFS filesystem in the same VPC/AZ and assign the same security group as the EC2 instance (NFS port 2049 must be open within the SG).
 
 ## Setup
 
@@ -35,37 +35,31 @@ devpod context set-options -o AGENT_INJECT_TIMEOUT=60
 If using a .pem key (AWS):
 
 ```bash
-# Fix permissions (required)
 chmod 600 ~/.ssh/<key-name>.pem
 
-# Add to ~/.ssh/config for convenience
-cat >> ~/.ssh/config << 'EOF'
-Host ws-ec2
-    HostName <public-ip>
-    User ubuntu
-    IdentityFile ~/.ssh/<key-name>.pem
-EOF
-
 # Test
-ssh ws-ec2
+ssh -o IdentitiesOnly=yes -i ~/.ssh/<key-name>.pem ubuntu@<elastic-ip> echo ok
 ```
 
 ### 2. Run host setup
 
-On the remote machine (installs Docker, firewall, fail2ban, chezmoi, age, EFS):
+On the remote machine (installs Docker, firewall, fail2ban, chezmoi, age, EFS, memory limits):
 
 ```bash
 # VPS (local disk for /workspace)
-ssh ws-ec2 'curl -sSL https://raw.githubusercontent.com/dimdasci/workspaces/main/host-setup.sh | bash'
+ssh -o IdentitiesOnly=yes -i ~/.ssh/<key-name>.pem ubuntu@<elastic-ip> \
+  'curl -sSL https://raw.githubusercontent.com/dimdasci/workspaces/main/host-setup.sh | bash'
 
 # AWS EC2 (EFS for /workspace — survives instance termination)
-ssh ws-ec2 'curl -sSL https://raw.githubusercontent.com/dimdasci/workspaces/main/host-setup.sh | bash -s -- --efs fs-xxx us-east-1'
+ssh -o IdentitiesOnly=yes -i ~/.ssh/<key-name>.pem ubuntu@<elastic-ip> \
+  'curl -sSL https://raw.githubusercontent.com/dimdasci/workspaces/main/host-setup.sh | bash -s -- --efs <fs-id> <region>'
 ```
 
 The script is idempotent — safe to re-run. It configures:
 - Docker engine + adds your user to docker group
 - `/workspace` directory — EFS mount (AWS) or local disk (VPS)
-- ufw firewall: ports 22, 2222 open; everything else blocked
+- Docker memory limits auto-calculated from host RAM
+- ufw firewall: port 22 open; everything else blocked
 - fail2ban for SSH brute force protection
 - SSH hardening: key-only auth, no root login
 - chezmoi + age (for dotfiles and secret management)
@@ -74,10 +68,10 @@ The script is idempotent — safe to re-run. It configures:
 
 ```bash
 # Copy your age encryption key to the remote host
-scp ~/.age/key.txt ws-ec2:~/.config/chezmoi/key.txt
+scp -o IdentitiesOnly=yes -i ~/.ssh/<key-name>.pem ~/.age/key.txt ubuntu@<elastic-ip>:~/.config/chezmoi/key.txt
 
 # Bootstrap dotfiles
-ssh ws-ec2 'chezmoi init --apply <your-github-username>'
+ssh -o IdentitiesOnly=yes -i ~/.ssh/<key-name>.pem ubuntu@<elastic-ip> 'chezmoi init --apply <your-github-username>'
 ```
 
 ### 4. Add DevPod SSH provider
@@ -86,7 +80,7 @@ One provider per remote machine. Name it to match the host:
 
 ```bash
 devpod provider add ssh --name <ws-name> \
-  -o HOST=ubuntu@<public-ip> \
+  -o HOST=ubuntu@<elastic-ip> \
   -o EXTRA_FLAGS="-o IdentitiesOnly=yes -i ~/.ssh/<key-name>.pem"
 ```
 
@@ -98,7 +92,7 @@ Use `--id` matching the provider name so everything stays consistent:
 devpod up github.com/dimdasci/workspaces --provider <ws-name> --id <ws-name> --ide none
 ```
 
-First build takes several minutes (downloads base image, installs XFCE, KasmVNC, all tools). Subsequent rebuilds use Docker cache.
+First build takes ~30 minutes on ARM (downloads base image, installs XFCE, KasmVNC, Chromium, all tools). Subsequent rebuilds use Docker cache and are faster.
 
 ### 6. Connect
 
@@ -107,13 +101,31 @@ First build takes several minutes (downloads base image, installs XFCE, KasmVNC,
 ssh <ws-name>.devpod
 ```
 
-tmux starts automatically. `Ctrl+B %` splits vertically, `Ctrl+B "` splits horizontally, `Ctrl+B <arrow>` switches panes. If SSH drops, reconnect and `tmux attach` — session is preserved.
-
 **Graphical desktop (separate Mac terminal):**
 ```bash
-ssh -L 8443:localhost:8443 -o IdentitiesOnly=yes -i ~/.ssh/<key-name>.pem ubuntu@<public-ip>
+ssh -L 8443:localhost:8443 <ws-name>.devpod
 ```
-Then open `http://localhost:8443` in your browser. Password: `vscode`. XFCE desktop with Chromium in the app menu.
+Then open `https://localhost:8443` in your browser (accept the self-signed cert warning). Password: `vscode`. XFCE desktop with Chromium in the app menu.
+
+**Port forwarding for dev servers:**
+```bash
+# Forward any port from the container to your Mac
+ssh -L <port>:localhost:<port> <ws-name>.devpod
+
+# Multiple ports at once
+ssh -L 3000:localhost:3000 -L 5173:localhost:5173 <ws-name>.devpod
+```
+
+### 7. First-time setup inside the container
+
+```bash
+# Set git identity (persisted on EFS)
+git config --global user.name "Your Name"
+git config --global user.email "you@example.com"
+
+# Authenticate with GitHub (use device flow — paste code in Mac browser)
+gh auth login
+```
 
 ## Clipboard
 
@@ -128,17 +140,17 @@ Then open `http://localhost:8443` in your browser. Password: `vscode`. XFCE desk
 **Images Mac → Remote (for Claude Code):**
 ```bash
 # Add to ~/.zshrc on Mac:
-alias ws1-img='f=$(date +%Y%m%d-%H%M%S).png; pngpaste /tmp/$f && scp -P 2222 /tmp/$f vscode@ws-ec2:/workspace/.clipboard/$f && echo "/workspace/.clipboard/$f"'
+alias ws1-img='f=$(date +%Y%m%d-%H%M%S).png; pngpaste /tmp/$f && scp -P 2222 /tmp/$f vscode@localhost:/workspace/.clipboard/$f && echo "/workspace/.clipboard/$f"'
 ```
-Copy image to clipboard, run `ws1-img`, pass the printed path to Claude.
+Copy image to clipboard, run `ws1-img`, pass the printed path to Claude. Requires an SSH tunnel with port 2222 forwarded.
 
 ## Mac shell aliases
 
 ```bash
 # Add to ~/.zshrc — one set per workspace
 alias ws1='ssh ec2-ws.devpod'
-alias ws1-vnc='ssh -L 8443:localhost:8443 -o IdentitiesOnly=yes -i ~/.ssh/claude-ws.pem ubuntu@<public-ip>'
-alias ws1-img='f=$(date +%Y%m%d-%H%M%S).png; pngpaste /tmp/$f && scp -P 2222 /tmp/$f vscode@<public-ip>:/workspace/.clipboard/$f && echo "/workspace/.clipboard/$f"'
+alias ws1-vnc='ssh -L 8443:localhost:8443 ec2-ws.devpod'
+alias ws1-img='f=$(date +%Y%m%d-%H%M%S).png; pngpaste /tmp/$f && scp -P 2222 /tmp/$f vscode@localhost:/workspace/.clipboard/$f && echo "/workspace/.clipboard/$f"'
 ```
 
 ## Multiple workspaces
@@ -170,7 +182,10 @@ devpod up github.com/dimdasci/workspaces --provider <ws-name> --id <ws-name> --i
 
 | What | Where | Lifecycle |
 |---|---|---|
-| Project files, git repos, .claude/ | `/workspace` on host | Survives container rebuild |
+| Project files, git repos | `/workspace` on EFS | Survives everything |
+| Claude config | `/workspace/.claude` | Survives everything |
+| gh auth, opencode config | `/workspace/.config/` | Survives everything |
+| git config | `/workspace/.gitconfig` | Survives everything |
 | Container, tools, caches | Inside container | Rebuilt from Dockerfile |
 
 **AWS EC2:** EFS is required. Pass `--efs` to `host-setup.sh` (see step 2). Data survives instance termination.
@@ -179,9 +194,10 @@ devpod up github.com/dimdasci/workspaces --provider <ws-name> --id <ws-name> --i
 
 ## Security
 
-- Firewall: ports 22 + 2222 open, KasmVNC (8443) via SSH tunnel only
+- Firewall: port 22 open, KasmVNC (8443) via SSH tunnel only
 - SSH: key-only, no root, fail2ban
 - Secrets: chezmoi + age in a separate private repo, never in this repo
+- Docker memory limits auto-calculated from host RAM
 
 ## Troubleshooting
 
@@ -196,21 +212,21 @@ Allocate an Elastic IP and associate it with the instance. Then update the provi
 ssh-keygen -R "[host]:2222"
 ```
 
-**UID mismatch on bind mounts:**
-```bash
-sudo chown -R 1000:1000 /workspace
-```
-
 **KasmVNC not starting:**
 ```bash
+cat /tmp/kasmvnc-start.log
 cat ~/.vnc/*.log
 kasmvncserver -kill :1
 kasmvncserver :1 -geometry 1920x1080 -depth 24 -websocketPort 8443
 ```
 
-**Clipboard not syncing:** verify SSH tunnel is active and you're accessing `http://localhost:8443` (not the remote IP).
+**Docker permission denied inside container:**
+Reconnect — the docker group fix applies on next login: `ssh <ws-name>.devpod`
 
-**GitHub raw CDN caching stale files:** append a cache-buster: `curl -sSL "https://...host-setup.sh?$(date +%s)" | bash`
+**GitHub raw CDN caching stale files:** use commit SHA instead of `main`:
+```bash
+curl -sSL "https://raw.githubusercontent.com/dimdasci/workspaces/<commit-sha>/host-setup.sh" | bash
+```
 
 ## Full documentation
 
