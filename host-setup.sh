@@ -72,6 +72,7 @@ if [ -n "$EFS_ID" ]; then
         echo "  installing amazon-efs-utils from source ..."
         sudo apt-get update
         sudo apt-get install -y git binutils rustc cargo pkg-config libssl-dev cmake golang-go
+        rm -rf /tmp/efs-utils
         git clone https://github.com/aws/efs-utils /tmp/efs-utils
         cd /tmp/efs-utils
         ./build-deb.sh
