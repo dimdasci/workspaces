@@ -53,8 +53,8 @@ fi
 echo "==> Setting up KasmVNC"
 mkdir -p ~/.vnc
 cp "$(dirname "$0")/kasmvnc.yaml" ~/.vnc/kasmvnc.yaml
-cp "$(dirname "$0")/xstartup.sh" ~/.vnc/xstartup.sh
-chmod +x ~/.vnc/xstartup.sh
+cp "$(dirname "$0")/xstartup.sh" ~/.vnc/xstartup
+chmod +x ~/.vnc/xstartup
 echo -e "vscode\nvscode\n" | kasmvncpasswd -u vscode -w
 touch ~/.vnc/.de-was-selected
 openssl req -x509 -nodes -days 3650 -newkey rsa:2048 \
