@@ -28,6 +28,8 @@
     "CLAUDE_CONFIG_DIR": "/workspace/.claude"
   },
 
+  "workspaceFolder": "/workspace",
+
   "remoteUser": "vscode",
   "updateRemoteUserUID": true,
 

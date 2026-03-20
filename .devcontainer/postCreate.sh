@@ -81,9 +81,11 @@ cat > ~/.tmux.conf <<'EOF'
 # OSC-52 clipboard passthrough
 set -g set-clipboard on
 
-# 256-color terminal support
-set -g default-terminal "screen-256color"
-set -ga terminal-overrides ",xterm-256color:Tc"
+# True color support
+set -g default-terminal "tmux-256color"
+set -ga terminal-overrides ",alacritty:RGB"
+set -ga terminal-overrides ",ghostty:RGB"
+set -ga terminal-overrides ",xterm-256color:RGB"
 
 # Large scrollback buffer
 set -g history-limit 50000
