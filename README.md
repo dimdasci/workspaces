@@ -66,13 +66,9 @@ The script is idempotent — safe to re-run. It configures:
 
 ### 3. Set up chezmoi (optional, skip for initial testing)
 
-```bash
-# Copy your age encryption key to the remote host
-scp -o IdentitiesOnly=yes -i ~/.ssh/<key-name>.pem ~/.age/key.txt ubuntu@<elastic-ip>:~/.config/chezmoi/key.txt
+Chezmoi manages dotfiles and secrets across workspaces. It stores your config in a private git repo and applies it inside the container. Skip this step on first setup — come back after the workspace is running.
 
-# Bootstrap dotfiles
-ssh -o IdentitiesOnly=yes -i ~/.ssh/<key-name>.pem ubuntu@<elastic-ip> 'chezmoi init --apply <your-github-username>'
-```
+See [Chezmoi guide](#chezmoi-guide) below for the full walkthrough.
 
 ### 4. Add DevPod SSH provider
 
@@ -241,6 +237,137 @@ Delete + recreate is needed after Dockerfile changes.
 - SSH: key-only, no root, fail2ban
 - Secrets: chezmoi + age in a separate private repo, never in this repo
 - Docker memory limits auto-calculated from host RAM
+
+## Chezmoi guide
+
+Chezmoi keeps your dotfiles in a private git repo. On a fresh workspace, one command restores everything. Sensitive files (API keys, tokens) are encrypted with age.
+
+### How it works
+
+```
+Private git repo (e.g. github.com/you/stuff)
+  └── dot_gitconfig              ← plain file, becomes /workspace/.gitconfig
+  └── encrypted_dot_env.age      ← encrypted, decrypted on apply
+  └── dot_claude/settings.json   ← directory structure preserved
+
+chezmoi apply  →  /workspace/.gitconfig
+                   /workspace/.env
+                   /workspace/.claude/settings.json
+```
+
+Chezmoi renames files: `dot_` prefix becomes `.`, `encrypted_` files are decrypted, directories map to paths. The source repo is safe to push to GitHub — encrypted files can't be read without your age key.
+
+### First-time setup
+
+**1. Create a private repo** (e.g. `github.com/<you>/stuff`) on GitHub.
+
+**2. Inside the container**, install and init chezmoi:
+
+```bash
+# Install chezmoi
+sh -c "$(curl -fsLS get.chezmoi.io)" -- -b ~/.local/bin
+export PATH="$HOME/.local/bin:$PATH"
+
+# Init with your repo, store source in /workspace so it persists
+chezmoi init <your-github-username>/stuff --source /workspace/.chezmoi-source
+
+# Tell chezmoi to target /workspace instead of ~
+mkdir -p ~/.config/chezmoi
+cat > ~/.config/chezmoi/chezmoi.toml << 'EOF'
+sourceDir = "/workspace/.chezmoi-source"
+destDir = "/workspace"
+EOF
+```
+
+**3. Add files** you want managed:
+
+```bash
+# Track a file — chezmoi copies it into the source repo
+chezmoi add /workspace/.gitconfig
+chezmoi add /workspace/.claude/settings.json
+
+# See what chezmoi manages
+chezmoi managed
+```
+
+**4. Edit managed files** (always edit through chezmoi so source stays in sync):
+
+```bash
+chezmoi edit /workspace/.gitconfig
+```
+
+**5. Push to your repo:**
+
+```bash
+cd /workspace/.chezmoi-source
+git add -A && git commit -m "Add dotfiles" && git push
+```
+
+### On a fresh workspace
+
+After `devpod up` creates a new container:
+
+```bash
+sh -c "$(curl -fsLS get.chezmoi.io)" -- -b ~/.local/bin
+export PATH="$HOME/.local/bin:$PATH"
+
+mkdir -p ~/.config/chezmoi
+cat > ~/.config/chezmoi/chezmoi.toml << 'EOF'
+sourceDir = "/workspace/.chezmoi-source"
+destDir = "/workspace"
+EOF
+
+chezmoi init --apply <your-github-username>/stuff --source /workspace/.chezmoi-source
+```
+
+All your dotfiles are restored. If `/workspace/.chezmoi-source` already exists from a previous container (persisted on EFS), chezmoi pulls the latest and applies.
+
+### Encrypted files (secrets)
+
+For API keys, tokens, and other secrets — encrypt with age:
+
+```bash
+# One-time: set up age encryption
+mkdir -p /workspace/.age
+age-keygen -o /workspace/.age/key.txt   # or copy from your Mac
+
+# Tell chezmoi to use your age key
+cat >> ~/.config/chezmoi/chezmoi.toml << 'EOF'
+
+encryption = "age"
+[age]
+    identity = "/workspace/.age/key.txt"
+    recipient = "age1..."  # your public key from key.txt
+EOF
+
+# Add a secret file — chezmoi encrypts it automatically
+chezmoi add --encrypt /workspace/.env
+```
+
+The encrypted file appears as `encrypted_dot_env.age` in the source repo — safe to push.
+
+### Chezmoi cheatsheet
+
+| Command | Action |
+|---|---|
+| `chezmoi add <file>` | Start managing a file |
+| `chezmoi add --encrypt <file>` | Manage with encryption |
+| `chezmoi edit <file>` | Edit a managed file |
+| `chezmoi apply` | Apply all managed files to target |
+| `chezmoi diff` | Preview what `apply` would change |
+| `chezmoi managed` | List all managed files |
+| `chezmoi update` | Pull latest from repo + apply |
+| `chezmoi cd` | cd into the source directory |
+
+### What to manage with chezmoi
+
+| File | Why |
+|---|---|
+| `/workspace/.gitconfig` | Git identity |
+| `/workspace/.claude/settings.json` | Claude Code preferences |
+| `/workspace/.config/gh/hosts.yml` | GitHub CLI auth (encrypt) |
+| `/workspace/.env` | API keys, tokens (encrypt) |
+| `/workspace/.tmux.conf` | tmux customization |
 
 ## Troubleshooting
 
