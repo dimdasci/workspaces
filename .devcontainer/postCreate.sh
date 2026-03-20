@@ -30,6 +30,11 @@ done
 # Git config — always symlink so git config --global writes to /workspace
 touch /workspace/.gitconfig
 ln -sf /workspace/.gitconfig "${HOME}/.gitconfig"
+
+# Bash aliases — persistent on /workspace, sourced by default .bashrc
+if [ -f /workspace/.bash_aliases ]; then
+    ln -sf /workspace/.bash_aliases "${HOME}/.bash_aliases"
+fi
 if ! git config --global user.name &>/dev/null; then
     echo "NOTE: git user not configured. Run: git config --global user.name 'Your Name' && git config --global user.email 'you@example.com'"
 fi

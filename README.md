@@ -178,6 +178,33 @@ alias ws1-img='f=$(date +%Y%m%d-%H%M%S).png; pngpaste /tmp/$f && scp /tmp/$f ec2
 ```
 Replace `ec2-ws` with your workspace name. Pick any free local port for VNC (9443, 8444, etc.).
 
+## Container shell aliases
+
+Aliases inside the container live in `/workspace/.bash_aliases` (persistent, managed by chezmoi). The container's `.bashrc` sources this file automatically via a symlink set up by postCreate.sh.
+
+```bash
+# View all aliases
+alias
+
+# View a specific alias
+alias cld
+
+# Edit aliases
+chezmoi edit /workspace/.bash_aliases
+# or edit directly and sync:
+vim /workspace/.bash_aliases
+chezmoi add /workspace/.bash_aliases
+
+# Reload after editing (or just reconnect)
+source ~/.bash_aliases
+```
+
+Default aliases shipped via chezmoi:
+
+| Alias | Command |
+|---|---|
+| `cld` | `claude --dangerously-skip-permissions --append-system-prompt-file /workspace/.claude/system-prompt.md` |
+
 ## Multiple workspaces
 
 Each remote machine gets its own provider and workspace ID:
@@ -290,10 +317,15 @@ chezmoi add /workspace/.claude/settings.json
 chezmoi managed
 ```
 
-**4. Edit managed files** (always edit through chezmoi so source stays in sync):
+**4. Edit managed files** — two ways:
 
 ```bash
+# Option A: edit through chezmoi (source stays in sync automatically)
 chezmoi edit /workspace/.gitconfig
+
+# Option B: edit the file directly, then sync back to chezmoi
+vim /workspace/.gitconfig
+chezmoi add /workspace/.gitconfig   # re-sync after direct edit
 ```
 
 **5. Push to your repo:**
