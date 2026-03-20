@@ -127,6 +127,34 @@ git config --global user.email "you@example.com"
 gh auth login
 ```
 
+## tmux cheatsheet
+
+All commands start with `Ctrl+b` (prefix), then a second key.
+
+**Sessions:**
+| Keys | Action |
+|---|---|
+| `tmux` | Start new session |
+| `Ctrl+b d` | Detach (session keeps running) |
+| `tmux attach` | Reattach to session |
+
+**Panes (splits):**
+| Keys | Action |
+|---|---|
+| `Ctrl+b "` | Split horizontal (top/bottom) |
+| `Ctrl+b %` | Split vertical (left/right) |
+| `Ctrl+b arrow` | Move between panes |
+| `Ctrl+b x` | Close pane (confirm with `y`) |
+
+**Windows (tabs):**
+| Keys | Action |
+|---|---|
+| `Ctrl+b c` | New window |
+| `Ctrl+b n` / `Ctrl+b p` | Next / previous window |
+| `Ctrl+b 0-9` | Jump to window by number |
+
+Detach/attach is the killer feature: your session survives SSH disconnects. Reconnect and `tmux attach` — everything is where you left it.
+
 ## Clipboard
 
 **Terminal (SSH + tmux):**
