@@ -61,6 +61,15 @@ openssl req -x509 -nodes -days 3650 -newkey rsa:2048 \
     -keyout ~/.vnc/self.key -out ~/.vnc/self.crt \
     -subj "/CN=localhost" 2>/dev/null
 
+# ─── Terminal info (alacritty, ghostty not in base image) ────────────────────
+echo "==> Installing terminfo entries"
+if ! infocmp alacritty &>/dev/null; then
+    curl -fsSL "https://raw.githubusercontent.com/alacritty/alacritty/master/extra/alacritty.info" | tic -x - 2>/dev/null || true
+fi
+if ! infocmp ghostty &>/dev/null; then
+    curl -fsSL "https://raw.githubusercontent.com/ghostty-org/ghostty/main/src/terminfo/ghostty.terminfo" | tic -x - 2>/dev/null || true
+fi
+
 # ─── tmux config ─────────────────────────────────────────────────────────────
 echo "==> Writing tmux config"
 cat > ~/.tmux.conf <<'EOF'
