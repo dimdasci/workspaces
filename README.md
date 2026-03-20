@@ -94,6 +94,14 @@ devpod up github.com/dimdasci/workspaces --provider <ws-name> --id <ws-name> --i
 
 First build takes ~30 minutes on ARM (downloads base image, installs XFCE, KasmVNC, Chromium, all tools). Subsequent rebuilds use Docker cache and are faster.
 
+**Custom ports** (optional — needed when running multiple workspaces on the same host):
+```bash
+WORKSPACE_SSH_PORT=2223 WORKSPACE_VNC_PORT=8444 \
+  devpod up github.com/dimdasci/workspaces --provider <ws-name> --id <ws-name> --ide none
+```
+
+Defaults: SSH `2222`, VNC `8443`. Port mappings are set at container creation — to change them, `devpod delete` and `devpod up` again (your `/workspace` files are not affected).
+
 ### 6. Connect
 
 **Terminal (primary):**
@@ -139,10 +147,10 @@ gh auth login
 
 **Images Mac → Remote (for Claude Code):**
 ```bash
-# Add to ~/.zshrc on Mac:
+# Add to ~/.zshrc on Mac (adjust port if you used WORKSPACE_SSH_PORT):
 alias ws1-img='f=$(date +%Y%m%d-%H%M%S).png; pngpaste /tmp/$f && scp -P 2222 /tmp/$f vscode@localhost:/workspace/.clipboard/$f && echo "/workspace/.clipboard/$f"'
 ```
-Copy image to clipboard, run `ws1-img`, pass the printed path to Claude. Requires an SSH tunnel with port 2222 forwarded.
+Copy image to clipboard, run `ws1-img`, pass the printed path to Claude. Requires an SSH tunnel with the container SSH port forwarded.
 
 ## Mac shell aliases
 
@@ -152,6 +160,7 @@ alias ws1='ssh ec2-ws.devpod'
 alias ws1-vnc='ssh -L 8443:localhost:8443 ec2-ws.devpod'
 alias ws1-img='f=$(date +%Y%m%d-%H%M%S).png; pngpaste /tmp/$f && scp -P 2222 /tmp/$f vscode@localhost:/workspace/.clipboard/$f && echo "/workspace/.clipboard/$f"'
 ```
+Adjust port `2222` if you used a custom `WORKSPACE_SSH_PORT`.
 
 ## Multiple workspaces
 
@@ -170,13 +179,27 @@ ssh ec2-ws.devpod       # first workspace
 ssh contabo-ws.devpod   # second workspace
 ```
 
-## Destroy and recreate
+## Lifecycle
 
+**Stop** (container stops, nothing is deleted):
+```bash
+devpod stop <ws-name>
+```
+
+**Start** (restarts a stopped container, no rebuild):
+```bash
+devpod up <ws-name>
+```
+
+If the remote VM was stopped and restarted, `devpod up <ws-name>` detects the existing container and starts it.
+
+**Delete and recreate** (container is removed, `/workspace` files are untouched):
 ```bash
 devpod delete <ws-name>
-# /workspace on the host is NOT deleted — all project files survive
 devpod up github.com/dimdasci/workspaces --provider <ws-name> --id <ws-name> --ide none
 ```
+
+Delete + recreate is needed when changing port mappings or after Dockerfile changes.
 
 ## Persistent storage
 
@@ -194,7 +217,7 @@ devpod up github.com/dimdasci/workspaces --provider <ws-name> --id <ws-name> --i
 
 ## Security
 
-- Firewall: port 22 open, KasmVNC (8443) via SSH tunnel only
+- Firewall: port 22 open, container SSH (default 2222, configurable via `WORKSPACE_SSH_PORT`), KasmVNC (8443) via SSH tunnel only
 - SSH: key-only, no root, fail2ban
 - Secrets: chezmoi + age in a separate private repo, never in this repo
 - Docker memory limits auto-calculated from host RAM

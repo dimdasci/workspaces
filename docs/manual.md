@@ -109,6 +109,27 @@ Adjust `host1` to your SSH host alias or IP. For a second workspace on a differe
 
 ---
 
+## Port configuration
+
+Container ports are configurable via environment variables (defaults in parentheses):
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `WORKSPACE_SSH_PORT` | `2222` | Host port mapped to container SSH |
+| `WORKSPACE_VNC_PORT` | `8443` | Host port mapped to KasmVNC |
+| `WORKSPACE_MEMORY` | `12g` | Container memory limit |
+| `WORKSPACE_SHM` | `2g` | Shared memory size |
+
+Set them when creating the workspace:
+
+```bash
+WORKSPACE_SSH_PORT=2223 WORKSPACE_VNC_PORT=8444 devpod up ./workspace --provider ssh --option HOST=vps1 --id work-1
+```
+
+Port mappings are fixed at container creation. To change them: `devpod delete` then `devpod up` with new values. `/workspace` files are not affected.
+
+---
+
 ## Multiple workspaces
 
 Each workspace is an independent DevPod environment, optionally on different hosts:
@@ -119,6 +140,13 @@ devpod up ./workspace --provider ssh --option HOST=vps2 --id work-2
 
 devpod ssh work-1
 devpod ssh work-2
+```
+
+For multiple workspaces on the **same host**, use different ports:
+
+```bash
+WORKSPACE_SSH_PORT=2222 devpod up ./workspace --provider ssh --option HOST=vps1 --id work-1
+WORKSPACE_SSH_PORT=2223 devpod up ./workspace --provider ssh --option HOST=vps1 --id work-2
 ```
 
 ---

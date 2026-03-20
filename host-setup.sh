@@ -144,7 +144,7 @@ echo "  configuring ufw rules ..."
 sudo ufw default deny incoming
 sudo ufw default allow outgoing
 sudo ufw allow 22/tcp   comment 'host SSH'
-sudo ufw allow 2222/tcp comment 'container SSH'
+sudo ufw allow "${WORKSPACE_SSH_PORT:-2222}"/tcp comment 'container SSH'
 # port 8443 (KasmVNC) intentionally NOT opened — SSH tunnel only
 
 echo "  enabling ufw (force) ..."
