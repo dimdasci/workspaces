@@ -6,9 +6,7 @@
 
   "runArgs": [
     "--memory=${localEnv:WORKSPACE_MEMORY:12g}",
-    "--shm-size=${localEnv:WORKSPACE_SHM:2g}",
-    "-p", "127.0.0.1:${localEnv:WORKSPACE_VNC_PORT:8443}:8443",
-    "-p", "127.0.0.1:${localEnv:WORKSPACE_SSH_PORT:2222}:2222"
+    "--shm-size=${localEnv:WORKSPACE_SHM:2g}"
   ],
 
   "features": {
@@ -19,8 +17,6 @@
     "ghcr.io/devcontainers/features/aws-cli:1": {},
     "ghcr.io/devcontainers/features/sshd:1": {}
   },
-
-  "forwardPorts": [8443],
 
   "mounts": [
     "source=/workspace,target=/workspace,type=bind",

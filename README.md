@@ -94,14 +94,6 @@ devpod up github.com/dimdasci/workspaces --provider <ws-name> --id <ws-name> --i
 
 First build takes ~30 minutes on ARM (downloads base image, installs XFCE, KasmVNC, Chromium, all tools). Subsequent rebuilds use Docker cache and are faster.
 
-**Custom ports** (optional — needed when running multiple workspaces on the same host):
-```bash
-WORKSPACE_SSH_PORT=2223 WORKSPACE_VNC_PORT=8444 \
-  devpod up github.com/dimdasci/workspaces --provider <ws-name> --id <ws-name> --ide none
-```
-
-Defaults: SSH `2222`, VNC `8443`. Port mappings are set at container creation — to change them, `devpod delete` and `devpod up` again (your `/workspace` files are not affected).
-
 ### 6. Connect
 
 **Terminal (primary):**
@@ -111,9 +103,9 @@ ssh <ws-name>.devpod
 
 **Graphical desktop (separate Mac terminal):**
 ```bash
-ssh -L 8443:localhost:8443 <ws-name>.devpod
+ssh -L <local-port>:localhost:8443 <ws-name>.devpod
 ```
-Then open `https://localhost:8443` in your browser (accept the self-signed cert warning). Password: `vscode`. XFCE desktop with Chromium in the app menu.
+Pick any free local port (e.g. 9443). Then open `https://localhost:<local-port>` in your browser (accept the self-signed cert warning). Password: `vscode`. XFCE desktop with Chromium in the app menu.
 
 **Port forwarding for dev servers:**
 ```bash
@@ -147,20 +139,20 @@ gh auth login
 
 **Images Mac → Remote (for Claude Code):**
 ```bash
-# Add to ~/.zshrc on Mac (adjust port if you used WORKSPACE_SSH_PORT):
-alias ws1-img='f=$(date +%Y%m%d-%H%M%S).png; pngpaste /tmp/$f && scp -P 2222 /tmp/$f vscode@localhost:/workspace/.clipboard/$f && echo "/workspace/.clipboard/$f"'
+# Add to ~/.zshrc on Mac:
+alias ws1-img='f=$(date +%Y%m%d-%H%M%S).png; pngpaste /tmp/$f && scp /tmp/$f ec2-ws.devpod:/workspace/.clipboard/$f && echo "/workspace/.clipboard/$f"'
 ```
-Copy image to clipboard, run `ws1-img`, pass the printed path to Claude. Requires an SSH tunnel with the container SSH port forwarded.
+Copy image to clipboard, run `ws1-img`, pass the printed path to Claude. Uses DevPod's SSH tunnel — no port configuration needed.
 
 ## Mac shell aliases
 
 ```bash
 # Add to ~/.zshrc — one set per workspace
 alias ws1='ssh ec2-ws.devpod'
-alias ws1-vnc='ssh -L 8443:localhost:8443 ec2-ws.devpod'
-alias ws1-img='f=$(date +%Y%m%d-%H%M%S).png; pngpaste /tmp/$f && scp -P 2222 /tmp/$f vscode@localhost:/workspace/.clipboard/$f && echo "/workspace/.clipboard/$f"'
+alias ws1-vnc='ssh -L 9443:localhost:8443 ec2-ws.devpod'
+alias ws1-img='f=$(date +%Y%m%d-%H%M%S).png; pngpaste /tmp/$f && scp /tmp/$f ec2-ws.devpod:/workspace/.clipboard/$f && echo "/workspace/.clipboard/$f"'
 ```
-Adjust port `2222` if you used a custom `WORKSPACE_SSH_PORT`.
+Replace `ec2-ws` with your workspace name. Pick any free local port for VNC (9443, 8444, etc.).
 
 ## Multiple workspaces
 
@@ -199,7 +191,7 @@ devpod delete <ws-name>
 devpod up github.com/dimdasci/workspaces --provider <ws-name> --id <ws-name> --ide none
 ```
 
-Delete + recreate is needed when changing port mappings or after Dockerfile changes.
+Delete + recreate is needed after Dockerfile changes.
 
 ## Persistent storage
 
@@ -217,7 +209,7 @@ Delete + recreate is needed when changing port mappings or after Dockerfile chan
 
 ## Security
 
-- Firewall: port 22 open, container SSH (default 2222, configurable via `WORKSPACE_SSH_PORT`), KasmVNC (8443) via SSH tunnel only
+- Firewall: port 22 (SSH) only — container ports are not published, accessed via DevPod tunnel
 - SSH: key-only, no root, fail2ban
 - Secrets: chezmoi + age in a separate private repo, never in this repo
 - Docker memory limits auto-calculated from host RAM
@@ -232,7 +224,7 @@ Allocate an Elastic IP and associate it with the instance. Then update the provi
 
 **SSH host key changed after rebuild:**
 ```bash
-ssh-keygen -R "[host]:2222"
+ssh-keygen -R "<host>"
 ```
 
 **KasmVNC not starting:**

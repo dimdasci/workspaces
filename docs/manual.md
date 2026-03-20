@@ -52,9 +52,7 @@ DevPod clones this repo into the remote host and starts the devcontainer. On fir
 ### Terminal (primary)
 
 ```bash
-devpod ssh my-workspace
-# or directly:
-ssh -p 2222 vscode@my-ec2
+ssh <ws-name>.devpod
 ```
 
 tmux attaches automatically on login. Pane splitting and session persistence work out of the box — disconnect and reconnect without losing your session.
@@ -62,12 +60,12 @@ tmux attaches automatically on login. Pane splitting and session persistence wor
 ### Graphical desktop
 
 ```bash
-ssh -L 8443:localhost:8443 my-ec2
+ssh -L <local-port>:localhost:8443 <ws-name>.devpod
 ```
 
-Open `http://localhost:8443` in your browser. Password: `vscode`. XFCE desktop with Chromium in the app menu.
+Pick any free local port (e.g. 9443). Open `https://localhost:<local-port>` in your browser. Password: `vscode`. XFCE desktop with Chromium in the app menu.
 
-KasmVNC requires HTTPS or localhost — the SSH tunnel provides this. Do not expose port 8443 directly.
+KasmVNC requires HTTPS or localhost — the SSH tunnel provides this.
 
 ---
 
@@ -88,10 +86,10 @@ Ctrl+V image paste does not work over SSH. Use `pngpaste` to save the clipboard 
 
 ```bash
 # Add to ~/.zshrc on Mac:
-alias ws1-img='f=$(date +%Y%m%d-%H%M%S).png; pngpaste /tmp/$f && scp -P 2222 /tmp/$f vscode@host1:/workspace/.clipboard/$f && echo "/workspace/.clipboard/$f"'
+alias ws1-img='f=$(date +%Y%m%d-%H%M%S).png; pngpaste /tmp/$f && scp /tmp/$f <ws-name>.devpod:/workspace/.clipboard/$f && echo "/workspace/.clipboard/$f"'
 ```
 
-Copy image to clipboard, run `ws1-img` in any Mac terminal. The path printed is valid inside the container. Pass it to Claude.
+Copy image to clipboard, run `ws1-img` in any Mac terminal. The path printed is valid inside the container. Pass it to Claude. Uses DevPod's SSH tunnel — no port configuration needed.
 
 ---
 
@@ -100,33 +98,23 @@ Copy image to clipboard, run `ws1-img` in any Mac terminal. The path printed is 
 Add to `~/.zshrc`:
 
 ```bash
-alias ws1='ssh -p 2222 vscode@host1'
-alias ws1-vnc='ssh -L 8443:localhost:8443 host1'
-alias ws1-img='f=$(date +%Y%m%d-%H%M%S).png; pngpaste /tmp/$f && scp -P 2222 /tmp/$f vscode@host1:/workspace/.clipboard/$f && echo "/workspace/.clipboard/$f"'
+alias ws1='ssh ec2-ws.devpod'
+alias ws1-vnc='ssh -L 9443:localhost:8443 ec2-ws.devpod'
+alias ws1-img='f=$(date +%Y%m%d-%H%M%S).png; pngpaste /tmp/$f && scp /tmp/$f ec2-ws.devpod:/workspace/.clipboard/$f && echo "/workspace/.clipboard/$f"'
 ```
 
-Adjust `host1` to your SSH host alias or IP. For a second workspace on a different host, duplicate with `ws2`, `ws2-vnc`, `ws2-img`.
+Replace `ec2-ws` with your workspace name. Pick any free local port for VNC. For a second workspace, duplicate with `ws2`, `ws2-vnc`, `ws2-img`.
 
 ---
 
-## Port configuration
+## Container resources
 
-Container ports are configurable via environment variables (defaults in parentheses):
+Container memory and shared memory are configurable via environment variables on the remote host:
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `WORKSPACE_SSH_PORT` | `2222` | Host port mapped to container SSH |
-| `WORKSPACE_VNC_PORT` | `8443` | Host port mapped to KasmVNC |
 | `WORKSPACE_MEMORY` | `12g` | Container memory limit |
 | `WORKSPACE_SHM` | `2g` | Shared memory size |
-
-Set them when creating the workspace:
-
-```bash
-WORKSPACE_SSH_PORT=2223 WORKSPACE_VNC_PORT=8444 devpod up ./workspace --provider ssh --option HOST=vps1 --id work-1
-```
-
-Port mappings are fixed at container creation. To change them: `devpod delete` then `devpod up` with new values. `/workspace` files are not affected.
 
 ---
 
@@ -142,12 +130,7 @@ devpod ssh work-1
 devpod ssh work-2
 ```
 
-For multiple workspaces on the **same host**, use different ports:
-
-```bash
-WORKSPACE_SSH_PORT=2222 devpod up ./workspace --provider ssh --option HOST=vps1 --id work-1
-WORKSPACE_SSH_PORT=2223 devpod up ./workspace --provider ssh --option HOST=vps1 --id work-2
-```
+No port conflicts — container ports are not published to the host. DevPod tunnels all traffic through the host's SSH port (22).
 
 ---
 
@@ -198,7 +181,7 @@ Attach an IAM role to the EC2 instance with required permissions. The AWS CLI in
 
 ## Security
 
-- **Firewall**: ports 22 (SSH) and 2222 (container SSH) open; port 8443 (KasmVNC) via SSH tunnel only — never expose it directly.
+- **Firewall**: port 22 (SSH) only — container ports are not published, accessed via DevPod tunnel.
 - **SSH**: key-only auth, no password login, no root login, fail2ban active after `host-setup.sh`.
 - **Secrets**: managed via chezmoi + age encryption. No secrets committed to this repo.
 
@@ -209,7 +192,7 @@ Attach an IAM role to the EC2 instance with required permissions. The AWS CLI in
 ### SSH host key changed after rebuild
 
 ```bash
-ssh-keygen -R "[host]:2222"
+ssh-keygen -R "<host>"
 ```
 
 Then reconnect — accept the new key.
