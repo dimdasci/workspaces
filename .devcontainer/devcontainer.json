@@ -19,7 +19,6 @@
   },
 
   "mounts": [
-    "source=/workspace,target=/workspace,type=bind",
     "source=/var/run/docker.sock,target=/var/run/docker.sock,type=bind",
     "source=${localEnv:HOME}/.ssh/authorized_keys,target=/tmp/host_authorized_keys,type=bind,readonly"
   ],
@@ -28,6 +27,7 @@
     "CLAUDE_CONFIG_DIR": "/workspace/.claude"
   },
 
+  "workspaceMount": "source=/workspace,target=/workspace,type=bind",
   "workspaceFolder": "/workspace",
 
   "remoteUser": "vscode",
