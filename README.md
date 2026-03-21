@@ -430,6 +430,15 @@ Reconnect — the docker group fix applies on next login: `ssh <ws-name>.devpod`
 curl -sSL "https://raw.githubusercontent.com/dimdasci/workspaces/<commit-sha>/host-setup.sh" | bash
 ```
 
+**"Error opening terminal: alacritty" (or similar):**
+Your local `$TERM` is passed to the remote, but the terminfo entry may be missing. `postCreate.sh` installs alacritty terminfo via `tic`, but it can fail silently on transient network issues. Fix: `curl -fsSL "https://raw.githubusercontent.com/alacritty/alacritty/master/extra/alacritty.info" | tic -x -`
+
+**"Duplicate mount point: /workspace":**
+Do NOT set `workspaceFolder` or `workspaceMount` in devcontainer.json. DevPod mounts repo source to `/workspaces/<id>` by default. EFS is at `/workspace` via explicit bind mount in `mounts[]`. Setting `workspaceFolder: "/workspace"` makes DevPod try to mount source there too — conflict. Use `cd /workspace` in `.bash_aliases` to land in EFS instead.
+
+**`postCreate.sh` changes not applied after `devpod up --recreate`:**
+DevPod caches the repo clone and doesn't pull on recreate. `postCreate.sh` runs `git pull --ff-only` at start to self-update, but if the container fails before reaching that point (e.g. mount error), the old code runs. Fix: pull manually on the host first: `ssh -i <key> ubuntu@<ip> 'cd /home/ubuntu/.devpod/agent/contexts/default/workspaces/<id>/content && git pull'`
+
 ## Full documentation
 
 See [`docs/manual.md`](docs/manual.md) for detailed configuration, AWS IAM setup, and architecture decisions.
