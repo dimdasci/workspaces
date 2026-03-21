@@ -39,11 +39,6 @@ ln -sf /workspace/.gitconfig "${HOME}/.gitconfig"
 if [ -f /workspace/.bash_aliases ]; then
     ln -sf /workspace/.bash_aliases "${HOME}/.bash_aliases"
 fi
-# COLORTERM — advertise true color support to CLI tools (e.g. Claude Code)
-if ! grep -q 'export COLORTERM' "${HOME}/.bashrc" 2>/dev/null; then
-    echo 'export COLORTERM=truecolor' >> "${HOME}/.bashrc"
-fi
-
 if ! git config --global user.name &>/dev/null; then
     echo "NOTE: git user not configured. Run: git config --global user.name 'Your Name' && git config --global user.email 'you@example.com'"
 fi
