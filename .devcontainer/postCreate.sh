@@ -125,6 +125,9 @@ install_ssm() {
 }
 install_or_warn "AWS Session Manager plugin" install_ssm
 
+# ─── chezmoi ────────────────────────────────────────────────────────────────
+install_or_warn "chezmoi" sh -c "$(curl -fsSL get.chezmoi.io)" -- -b ~/.local/bin
+
 # ─── opencode ────────────────────────────────────────────────────────────────
 install_or_warn "opencode" go install github.com/opencode-ai/opencode@latest
 
