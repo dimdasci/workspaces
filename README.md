@@ -439,6 +439,17 @@ Do NOT set `workspaceFolder` or `workspaceMount` in devcontainer.json. DevPod mo
 **`postCreate.sh` changes not applied after `devpod up --recreate`:**
 DevPod caches the repo clone and doesn't pull on recreate. `postCreate.sh` runs `git pull --ff-only` at start to self-update, but if the container fails before reaching that point (e.g. mount error), the old code runs. Fix: pull manually on the host first: `ssh -i <key> ubuntu@<ip> 'cd /home/ubuntu/.devpod/agent/contexts/default/workspaces/<id>/content && git pull'`
 
+**Claude Code colors washed out / unreadable diffs in tmux:**
+Claude Code v2.1.77+ hardcodes a 256-color downgrade when `$TMUX` is set, ignoring `COLORTERM=truecolor` and `FORCE_COLOR=3`. 24-bit diff highlight colors get approximated to the nearest 256-color match, making them oversaturated and unreadable. Tracked in [#36785](https://github.com/anthropics/claude-code/issues/36785). Workaround — launch Claude Code with `TMUX` cleared:
+```bash
+# In .bash_aliases
+alias claude="TMUX= command claude"
+```
+Note: `env -u TMUX command claude` does NOT work — `env` can't call bash builtins like `command`. Use `TMUX= command claude` instead.
+
+**tmux not using true color despite Tc override:**
+tmux matches terminal overrides against the outer `$TERM`. If SSH sets `TERM=dumb` or `xterm-256color` instead of `alacritty`, the `,alacritty:Tc` override won't match. Check with `tmux display-message -p '#{client_termname}'` and `tmux info | grep Tc` inside tmux. Ensure your local terminal sets `$TERM` correctly and SSH forwards it (`SendEnv TERM` in ssh_config, `AcceptEnv TERM` in sshd_config).
+
 ## Full documentation
 
 See [`docs/manual.md`](docs/manual.md) for detailed configuration, AWS IAM setup, and architecture decisions.
