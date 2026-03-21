@@ -447,6 +447,9 @@ alias claude="TMUX= command claude"
 ```
 Note: `env -u TMUX command claude` does NOT work — `env` can't call bash builtins like `command`. Use `TMUX= command claude` instead.
 
+**chezmoi source repo permission denied after `docker exec` as root:**
+Running `docker exec` without `-u vscode` creates files as root in `/workspace/.chezmoi-source/.git`, breaking git operations. Fix: `sudo chown -R vscode:vscode /workspace/.chezmoi-source/.git`. Avoid `docker exec` without `-u vscode` when touching `/workspace`.
+
 **tmux not using true color despite Tc override:**
 tmux matches terminal overrides against the outer `$TERM`. If SSH sets `TERM=dumb` or `xterm-256color` instead of `alacritty`, the `,alacritty:Tc` override won't match. Check with `tmux display-message -p '#{client_termname}'` and `tmux info | grep Tc` inside tmux. Ensure your local terminal sets `$TERM` correctly and SSH forwards it (`SendEnv TERM` in ssh_config, `AcceptEnv TERM` in sshd_config).
 
