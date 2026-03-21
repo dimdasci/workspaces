@@ -35,6 +35,11 @@ done
 touch /workspace/.gitconfig
 ln -sf /workspace/.gitconfig "${HOME}/.gitconfig"
 
+# AWS config — persistent on /workspace
+if [ -d /workspace/.aws ]; then
+    ln -sf /workspace/.aws "${HOME}/.aws"
+fi
+
 # Bash aliases — persistent on /workspace, sourced by default .bashrc
 if [ -f /workspace/.bash_aliases ]; then
     ln -sf /workspace/.bash_aliases "${HOME}/.bash_aliases"
@@ -135,6 +140,10 @@ if [ -x "${HOME}/.local/bin/chezmoi" ]; then
     cat > ~/.config/chezmoi/chezmoi.toml <<'CHEZEOF'
 sourceDir = "/workspace/.chezmoi-source"
 destDir = "/workspace"
+encryption = "age"
+[age]
+    identity = "/workspace/.age/key.txt"
+    recipient = "age1fxdg538s8gg9dfr59p5a4clek2r8x09xv2df3n97jnpj9387ud0q2zpq0z"
 CHEZEOF
 
     # If source exists (EFS), just apply; otherwise init from repo
