@@ -41,6 +41,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     # Terminal tools
     tmux \
     mosh \
+    ripgrep \
+    fzf \
     && rm -rf /var/lib/apt/lists/*
 
 # Add vscode user to docker group
