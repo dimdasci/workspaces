@@ -84,31 +84,10 @@ if ! infocmp ghostty &>/dev/null; then
     curl -fsSL "https://raw.githubusercontent.com/ghostty-org/ghostty/main/src/terminfo/ghostty.terminfo" | tic -x - 2>/dev/null || true
 fi
 
-# ─── tmux config ─────────────────────────────────────────────────────────────
-echo "==> Writing tmux config"
-cat > ~/.tmux.conf <<'EOF'
-# OSC-52 clipboard passthrough
-set -g set-clipboard on
-
-# True color support
-set -g default-terminal "tmux-256color"
-set -ga terminal-overrides ",alacritty:RGB"
-set -ga terminal-overrides ",ghostty:RGB"
-set -ga terminal-overrides ",xterm-256color:RGB"
-
-# Large scrollback buffer
-set -g history-limit 50000
-
-# Window numbering from 1
-set -g base-index 1
-setw -g pane-base-index 1
-
-# Reduce escape time for vim over SSH
-set -sg escape-time 10
-
-# Mouse support
-set -g mouse on
-EOF
+# ─── tmux config (managed by chezmoi, symlinked here) ───────────────────────
+if [ -f /workspace/.tmux.conf ]; then
+    ln -sf /workspace/.tmux.conf "${HOME}/.tmux.conf"
+fi
 
 # =============================================================================
 # Network-dependent installs (each wrapped so one failure doesn't kill the rest)
