@@ -158,6 +158,6 @@ CHEZEOF
 fi
 
 # ─── opencode ────────────────────────────────────────────────────────────────
-install_or_warn "opencode" go install github.com/opencode-ai/opencode@latest
+install_or_warn "opencode" bash -c "$(curl -fsSL https://opencode.ai/install)"
 
 echo "==> postCreate.sh complete"
