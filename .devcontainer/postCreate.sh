@@ -75,9 +75,6 @@ echo "==> Installing terminfo entries"
 if ! infocmp alacritty &>/dev/null; then
     curl -fsSL "https://raw.githubusercontent.com/alacritty/alacritty/master/extra/alacritty.info" | tic -x - 2>/dev/null || true
 fi
-if ! infocmp ghostty &>/dev/null; then
-    curl -fsSL "https://raw.githubusercontent.com/ghostty-org/ghostty/main/src/terminfo/ghostty.terminfo" | tic -x - 2>/dev/null || true
-fi
 
 # ─── tmux config (managed by chezmoi, symlinked here) ───────────────────────
 if [ -f /workspace/.tmux.conf ]; then
