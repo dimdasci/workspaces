@@ -35,11 +35,6 @@ done
 touch /workspace/.gitconfig
 ln -sf /workspace/.gitconfig "${HOME}/.gitconfig"
 
-# AWS config — persistent on /workspace
-if [ -d /workspace/.aws ]; then
-    ln -sf /workspace/.aws "${HOME}/.aws"
-fi
-
 # Bash aliases — persistent on /workspace, sourced by default .bashrc
 if [ -f /workspace/.bash_aliases ]; then
     ln -sf /workspace/.bash_aliases "${HOME}/.bash_aliases"
@@ -153,6 +148,12 @@ CHEZEOF
     else
         echo "==> Initializing chezmoi from repo"
         ~/.local/bin/chezmoi init dimdasci/stuff --source /workspace/.chezmoi-source --apply 2>/dev/null || echo "WARN: chezmoi init failed (non-fatal, run manually)"
+    fi
+
+    # Symlinks for chezmoi-managed dirs (must run after chezmoi apply)
+    if [ -d /workspace/.aws ]; then
+        rm -rf "${HOME}/.aws"
+        ln -sf /workspace/.aws "${HOME}/.aws"
     fi
 fi
 
