@@ -96,6 +96,9 @@ install_or_warn() {
 # ─── TypeScript language server ──────────────────────────────────────────────
 install_or_warn "TypeScript language server" npm install -g typescript typescript-language-server
 
+# ─── dev-browser (Playwright-based browser for AI agents) ───────────────────
+install_or_warn "dev-browser" npm install -g dev-browser
+
 # ─── Terraform ───────────────────────────────────────────────────────────────
 install_terraform() {
     local arch tf_version tf_url
