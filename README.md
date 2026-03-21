@@ -26,7 +26,7 @@ devpod context set-options -o AGENT_INJECT_TIMEOUT=60
 
 **Remote machine:** Ubuntu 22.04+ with SSH access and sudo. Minimum 4 GB RAM / 2 vCPU. 8 GB+ recommended for headed Chromium.
 
-**AWS EC2 example:** Ubuntu 24.04 AMI, t4g.xlarge (arm64, 4 vCPU, 16 GB), 32 GB gp3 EBS, security group allowing SSH (port 22) only. Allocate an Elastic IP so the address survives stop/start. Create an EFS filesystem in the same VPC/AZ and assign the same security group as the EC2 instance (NFS port 2049 must be open within the SG).
+**AWS EC2 example:** Ubuntu 24.04 AMI, t4g.xlarge (arm64, 4 vCPU, 16 GB), 64 GB gp3 EBS, security group allowing SSH (port 22) only. Allocate an Elastic IP so the address survives stop/start. Create an EFS filesystem in the same VPC/AZ and assign the same security group as the EC2 instance (NFS port 2049 must be open within the SG).
 
 ## Setup
 
@@ -449,6 +449,12 @@ Note: `env -u TMUX command claude` does NOT work — `env` can't call bash built
 
 **chezmoi source repo permission denied after `docker exec` as root:**
 Running `docker exec` without `-u vscode` creates files as root in `/workspace/.chezmoi-source/.git`, breaking git operations. Fix: `sudo chown -R vscode:vscode /workspace/.chezmoi-source/.git`. Avoid `docker exec` without `-u vscode` when touching `/workspace`.
+
+**Docker build fails with "no space left on device":**
+Docker images, layers, and build cache accumulate on the EBS root volume. Clean up: `docker system prune -a -f && docker builder prune -a -f`. If recurring, resize the EBS volume (can be done online without downtime): `aws ec2 modify-volume --volume-id <vol-id> --size 64`, then on the host: `sudo growpart /dev/nvme0n1 1 && sudo resize2fs /dev/nvme0n1p1`. 64GB is a safe size for dev workloads with multiple containers.
+
+**KasmVNC doesn't load in Safari:**
+Safari has issues with KasmVNC's WebSocket connection. Use Chrome or any Chromium-based browser instead.
 
 **tmux not using true color despite Tc override:**
 tmux matches terminal overrides against the outer `$TERM`. If SSH sets `TERM=dumb` or `xterm-256color` instead of `alacritty`, the `,alacritty:Tc` override won't match. Check with `tmux display-message -p '#{client_termname}'` and `tmux info | grep Tc` inside tmux. Ensure your local terminal sets `$TERM` correctly and SSH forwards it (`SendEnv TERM` in ssh_config, `AcceptEnv TERM` in sshd_config).
