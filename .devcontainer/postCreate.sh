@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# ─── Pull latest source (DevPod caches the repo clone, doesn't update) ───────
+echo "==> Pulling latest source"
+git pull --ff-only 2>/dev/null || echo "WARN: git pull failed (non-fatal)"
+
 # =============================================================================
 # Local operations first (no network, guaranteed to succeed)
 # =============================================================================
