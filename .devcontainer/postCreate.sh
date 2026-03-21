@@ -128,6 +128,25 @@ install_or_warn "AWS Session Manager plugin" install_ssm
 # ─── chezmoi ────────────────────────────────────────────────────────────────
 install_or_warn "chezmoi" sh -c "$(curl -fsSL get.chezmoi.io)" -- -b ~/.local/bin
 
+# Configure chezmoi to use /workspace as target
+if [ -x "${HOME}/.local/bin/chezmoi" ]; then
+    echo "==> Configuring chezmoi"
+    mkdir -p ~/.config/chezmoi
+    cat > ~/.config/chezmoi/chezmoi.toml <<'CHEZEOF'
+sourceDir = "/workspace/.chezmoi-source"
+destDir = "/workspace"
+CHEZEOF
+
+    # If source exists (EFS), just apply; otherwise init from repo
+    if [ -d /workspace/.chezmoi-source ]; then
+        echo "==> Applying chezmoi (existing source)"
+        ~/.local/bin/chezmoi apply 2>/dev/null || echo "WARN: chezmoi apply failed (non-fatal)"
+    else
+        echo "==> Initializing chezmoi from repo"
+        ~/.local/bin/chezmoi init dimdasci/stuff --source /workspace/.chezmoi-source --apply 2>/dev/null || echo "WARN: chezmoi init failed (non-fatal, run manually)"
+    fi
+fi
+
 # ─── opencode ────────────────────────────────────────────────────────────────
 install_or_warn "opencode" go install github.com/opencode-ai/opencode@latest
 
