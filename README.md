@@ -484,7 +484,10 @@ Host <ws-name>.devpod
 Replace `$(which devpod)` with the actual path (e.g. `/opt/homebrew/bin/devpod` on macOS ARM).
 
 **DevPod `devpod up` crashes with "tunnelServer.GitCredentials" stack trace:**
-This is a DevPod bug in git credential forwarding — usually non-fatal. The container is likely running. Verify: `devpod ssh <ws-name> -- echo ok`. If it connects, the workspace is fine. Check that the SSH config entry was created (see above).
+This is a DevPod bug in git credential forwarding — usually non-fatal. The container is likely running. Verify: `devpod ssh <ws-name> -- echo ok`. If it connects, the workspace is fine. Check that the SSH config entry was created (see above). Note: the crash may skip `postStartCommand`, so KasmVNC won't be running. Start it manually:
+```bash
+kasmvncserver :1 -geometry 1920x1080 -depth 24 -websocketPort 8443
+```
 
 ## Full documentation
 
