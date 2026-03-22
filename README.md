@@ -483,6 +483,9 @@ Host <ws-name>.devpod
 ```
 Replace `$(which devpod)` with the actual path (e.g. `/opt/homebrew/bin/devpod` on macOS ARM).
 
+**DevPod `devpod up` crashes with "tunnelServer.GitCredentials" stack trace:**
+This is a DevPod bug in git credential forwarding — usually non-fatal. The container is likely running. Verify: `devpod ssh <ws-name> -- echo ok`. If it connects, the workspace is fine. Check that the SSH config entry was created (see above).
+
 ## Full documentation
 
 See [`docs/manual.md`](docs/manual.md) for detailed configuration, AWS IAM setup, and architecture decisions.
