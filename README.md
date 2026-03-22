@@ -467,6 +467,22 @@ Safari has issues with KasmVNC's WebSocket connection. Use Chrome or any Chromiu
 **tmux not using true color despite Tc override:**
 tmux matches terminal overrides against the outer `$TERM`. If SSH sets `TERM=dumb` or `xterm-256color` instead of `alacritty`, the `,alacritty:Tc` override won't match. Check with `tmux display-message -p '#{client_termname}'` and `tmux info | grep Tc` inside tmux. Ensure your local terminal sets `$TERM` correctly and SSH forwards it (`SendEnv TERM` in ssh_config, `AcceptEnv TERM` in sshd_config).
 
+**`ssh <ws-name>.devpod` — "Could not resolve hostname":**
+DevPod creates SSH config entries during `devpod up`. If it crashed or was interrupted, the entry may be missing. Re-run `devpod up <ws-name>` to recreate it. If that doesn't help, verify with `grep <ws-name> ~/.ssh/config` and add manually:
+```
+# DevPod Start <ws-name>.devpod
+Host <ws-name>.devpod
+  ForwardAgent yes
+  LogLevel error
+  StrictHostKeyChecking no
+  UserKnownHostsFile /dev/null
+  HostKeyAlgorithms rsa-sha2-256,rsa-sha2-512,ssh-rsa
+  ProxyCommand "$(which devpod)" ssh --stdio --context default --user vscode <ws-name>
+  User vscode
+# DevPod End <ws-name>.devpod
+```
+Replace `$(which devpod)` with the actual path (e.g. `/opt/homebrew/bin/devpod` on macOS ARM).
+
 ## Full documentation
 
 See [`docs/manual.md`](docs/manual.md) for detailed configuration, AWS IAM setup, and architecture decisions.
