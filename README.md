@@ -28,6 +28,8 @@ devpod context set-options -o AGENT_INJECT_TIMEOUT=60
 
 **AWS EC2 example:** Ubuntu 24.04 AMI, t4g.xlarge (arm64, 4 vCPU, 16 GB), 64 GB gp3 EBS, security group allowing SSH (port 22) only. Allocate an Elastic IP so the address survives stop/start. Create an EFS filesystem in the same VPC/AZ and assign the same security group as the EC2 instance (NFS port 2049 must be open within the SG).
 
+> **`host-setup.sh` handles all host configuration** — Docker, EFS mount, firewall, memory limits. Do not manually install `amazon-efs-utils`, edit `/etc/fstab`, or create `/workspace`. Just run the script in step 2.
+
 ## Setup
 
 ### 1. Prepare SSH access
