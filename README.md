@@ -125,6 +125,12 @@ git config --global user.email "you@example.com"
 gh auth login
 ```
 
+**Fresh EFS (no existing dotfiles):** `postCreate.sh` tried to clone your chezmoi dotfiles during `devpod up` but failed because `gh auth` wasn't set up yet. After `gh auth login` above, re-run it:
+```bash
+/workspaces/<ws-name>/.devcontainer/postCreate.sh
+```
+Reconnect to pick up `.bash_aliases`.
+
 ## tmux cheatsheet
 
 All commands start with `Ctrl+b` (prefix), then a second key.
