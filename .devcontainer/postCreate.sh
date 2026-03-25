@@ -1,6 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Ensure ~/.local/bin is in PATH (claude, chezmoi, opencode install here)
+export PATH="${HOME}/.local/bin:${PATH}"
+if ! grep -q '\.local/bin' "${HOME}/.profile" 2>/dev/null; then
+    echo 'export PATH="${HOME}/.local/bin:${PATH}"' >> "${HOME}/.profile"
+fi
+
 # ─── Pull latest source (DevPod caches the repo clone, doesn't update) ───────
 echo "==> Pulling latest source"
 git pull --ff-only 2>/dev/null || echo "WARN: git pull failed (non-fatal)"
@@ -162,6 +168,9 @@ CHEZEOF
         ln -sf /workspace/.aws "${HOME}/.aws"
     fi
 fi
+
+# ─── Claude Code ─────────────────────────────────────────────────────────────
+install_or_warn "Claude Code" bash -c "$(curl -fsSL https://claude.ai/install.sh)"
 
 # ─── opencode ────────────────────────────────────────────────────────────────
 install_or_warn "opencode" bash -c "$(curl -fsSL https://opencode.ai/install)"
