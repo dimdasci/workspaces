@@ -21,8 +21,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libpango-1.0-0 \
     libcairo2 \
     libatspi2.0-0 \
-    # Docker CLI (socket passthrough to host daemon)
+    # Docker CLI + Compose plugin (socket passthrough to host daemon)
     docker.io \
+    docker-compose-plugin \
     # Media processing
     ffmpeg \
     imagemagick \
