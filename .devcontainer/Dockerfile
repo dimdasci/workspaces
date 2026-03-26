@@ -2,6 +2,12 @@ FROM mcr.microsoft.com/devcontainers/base:bookworm
 
 ARG KASMVNC_VERSION=1.3.3
 
+# Docker CLI + Compose from official Docker repo (Debian's docker.io lacks compose plugin support)
+RUN install -m 0755 -d /etc/apt/keyrings \
+    && curl -fsSL https://download.docker.com/linux/debian/gpg -o /etc/apt/keyrings/docker.asc \
+    && chmod a+r /etc/apt/keyrings/docker.asc \
+    && printf 'Types: deb\nURIs: https://download.docker.com/linux/debian\nSuites: bookworm\nComponents: stable\nSigned-By: /etc/apt/keyrings/docker.asc\n' > /etc/apt/sources.list.d/docker.sources
+
 # Chromium/Playwright deps + Docker CLI + media tools + terminal tools
 RUN apt-get update && apt-get install -y --no-install-recommends \
     # Chromium/Playwright dependencies
@@ -21,8 +27,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libpango-1.0-0 \
     libcairo2 \
     libatspi2.0-0 \
-    # Docker CLI + Compose plugin (socket passthrough to host daemon)
-    docker.io \
+    # Docker CLI + Compose plugin (from Docker's official repo, socket passthrough to host daemon)
+    docker-ce-cli \
     docker-compose-plugin \
     # Media processing
     ffmpeg \
