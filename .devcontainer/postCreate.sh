@@ -110,6 +110,18 @@ install_or_warn() {
     fi
 }
 
+# ─── Docker Compose plugin (Debian's docker.io lacks it; install from Docker's official repo) ─
+install_docker_compose() {
+    install -m 0755 -d /etc/apt/keyrings
+    curl -fsSL https://download.docker.com/linux/debian/gpg -o /etc/apt/keyrings/docker.asc
+    chmod a+r /etc/apt/keyrings/docker.asc
+    printf 'Types: deb\nURIs: https://download.docker.com/linux/debian\nSuites: bookworm\nComponents: stable\nSigned-By: /etc/apt/keyrings/docker.asc\n' \
+        | sudo tee /etc/apt/sources.list.d/docker.sources >/dev/null
+    sudo apt-get update -o Dir::Etc::sourcelist=/etc/apt/sources.list.d/docker.sources -o Dir::Etc::sourceparts="-" -o APT::Get::List-Cleanup="0"
+    sudo apt-get install -y --no-install-recommends docker-compose-plugin
+}
+install_or_warn "Docker Compose plugin" install_docker_compose
+
 # ─── TypeScript language server ──────────────────────────────────────────────
 install_or_warn "TypeScript language server" npm install -g typescript typescript-language-server
 
