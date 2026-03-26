@@ -21,7 +21,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libpango-1.0-0 \
     libcairo2 \
     libatspi2.0-0 \
-    # Docker CLI (socket passthrough to host daemon; compose plugin added in postCreate.sh)
+    # Docker CLI (socket passthrough to host daemon)
     docker.io \
     # Media processing
     ffmpeg \
@@ -43,6 +43,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     mosh \
     ripgrep \
     fzf \
+    && rm -rf /var/lib/apt/lists/*
+
+# Docker Compose plugin from Docker's official repo (not in Debian's packages)
+RUN install -m 0755 -d /etc/apt/keyrings \
+    && curl -fsSL https://download.docker.com/linux/debian/gpg -o /etc/apt/keyrings/docker.asc \
+    && chmod a+r /etc/apt/keyrings/docker.asc \
+    && printf 'Types: deb\nURIs: https://download.docker.com/linux/debian\nSuites: bookworm\nComponents: stable\nSigned-By: /etc/apt/keyrings/docker.asc\n' > /etc/apt/sources.list.d/docker.sources \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends docker-compose-plugin \
     && rm -rf /var/lib/apt/lists/*
 
 # Add vscode user to docker group

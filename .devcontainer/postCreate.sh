@@ -112,6 +112,8 @@ install_or_warn() {
 
 # ─── Docker Compose plugin (Debian's docker.io lacks it; install from Docker's official repo) ─
 install_docker_compose() {
+    # Skip if already installed (fresh build has it from Dockerfile)
+    if docker compose version &>/dev/null; then return 0; fi
     install -m 0755 -d /etc/apt/keyrings
     curl -fsSL https://download.docker.com/linux/debian/gpg -o /etc/apt/keyrings/docker.asc
     chmod a+r /etc/apt/keyrings/docker.asc
