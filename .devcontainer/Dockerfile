@@ -38,6 +38,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     chromium \
     # KasmVNC Perl dependency
     libdatetime-perl \
+    # PostgreSQL client
+    postgresql-client \
     # Terminal tools
     tmux \
     mosh \
