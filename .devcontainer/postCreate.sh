@@ -8,8 +8,16 @@ if ! grep -q '\.local/bin' "${HOME}/.profile" 2>/dev/null; then
 fi
 
 # ─── Pull latest source (DevPod caches the repo clone, doesn't update) ───────
-echo "==> Pulling latest source"
-git pull --ff-only 2>/dev/null || echo "WARN: git pull failed (non-fatal)"
+# Bash reads scripts by byte offset, not line number. git pull can replace this
+# file mid-execution, causing bash to read corrupted content at the old offset
+# in the new file. Fix: pull first, then re-exec so bash reads the updated file
+# from the start.
+if [ "${_POSTCREATE_UPDATED:-0}" = "0" ]; then
+    echo "==> Pulling latest source"
+    git pull --ff-only 2>/dev/null || echo "WARN: git pull failed (non-fatal)"
+    echo "==> Re-executing updated postCreate.sh"
+    exec env _POSTCREATE_UPDATED=1 bash -l "$0"
+fi
 
 # =============================================================================
 # Local operations first (no network, guaranteed to succeed)
