@@ -508,7 +508,7 @@ inject_claude_md() {
         echo "$CLAUDE_MD_END"
     } >> "$claude_md"
 
-    # Exclude injected CLAUDE.md changes from git
+    # Exclude ws-session generated files from git
     local exclude_file="${session_dir}/.git/info/exclude"
     mkdir -p "$(dirname "$exclude_file")"
     if ! grep -q "ws-session" "$exclude_file" 2>/dev/null; then
@@ -516,6 +516,9 @@ inject_claude_md() {
         echo ".session.env" >> "$exclude_file"
         echo "docker-compose.override.yml" >> "$exclude_file"
     fi
+
+    # Hide CLAUDE.md modifications from git (tracked file, can't use exclude)
+    git -C "$session_dir" update-index --assume-unchanged CLAUDE.md 2>/dev/null || true
 
     log "injected session context into CLAUDE.md"
 }
