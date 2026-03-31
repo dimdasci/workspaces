@@ -654,6 +654,14 @@ cmd_create() {
         git -C "$session_dir" checkout "$ref_branch"
     fi
 
+    # Copy .ws-sessions.yml from reference repo if not in clone (untracked in ref)
+    local ref_config="${ref_repo}/${WS_CONFIG}"
+    local session_config="${session_dir}/${WS_CONFIG}"
+    if [ -f "$ref_config" ] && [ ! -f "$session_config" ]; then
+        cp "$ref_config" "$session_config"
+        log "copied ${WS_CONFIG} from reference repo"
+    fi
+
     # Load config and allocate ports
     local ports_json="{}"
     local proc default_port allocated_port
