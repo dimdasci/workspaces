@@ -7,7 +7,8 @@ set -euo pipefail
 #
 # Usage:
 #   bash host-setup.sh                          # VPS (local disk)
-#   bash host-setup.sh --efs fs-xxx us-east-1   # AWS EC2 (EFS)
+#   bash host-setup.sh --ebs /dev/nvme1n1       # AWS EC2 (EBS, formats XFS with reflinks)
+#   bash host-setup.sh --efs fs-xxx us-east-1   # AWS EC2 (EFS, NFS-based)
 # =============================================================================
 
 BANNER="==================================================================="
@@ -15,12 +16,17 @@ BANNER="==================================================================="
 # Parse arguments
 EFS_ID=""
 AWS_REGION=""
+EBS_DEVICE=""
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --efs)
             EFS_ID="$2"
             AWS_REGION="${3:?'AWS region required after EFS ID, e.g.: --efs fs-xxx us-east-1'}"
             shift 3
+            ;;
+        --ebs)
+            EBS_DEVICE="${2:?'Block device required, e.g.: --ebs /dev/nvme1n1'}"
+            shift 2
             ;;
         *)
             echo "Unknown option: $1" >&2
@@ -66,8 +72,39 @@ else
     sudo mkdir -p /workspace
 fi
 
-if [ -n "$EFS_ID" ]; then
-    # Install EFS utils if needed
+if [ -n "$EBS_DEVICE" ]; then
+    # EBS volume: format if needed, mount by UUID with nofail
+    if ! [ -b "$EBS_DEVICE" ]; then
+        echo "  ERROR: block device $EBS_DEVICE not found" >&2
+        exit 1
+    fi
+
+    # Format as XFS with reflinks if not already formatted
+    FS_TYPE=$(blkid -o value -s TYPE "$EBS_DEVICE" 2>/dev/null || true)
+    if [ -z "$FS_TYPE" ]; then
+        echo "  formatting $EBS_DEVICE as XFS with reflink support ..."
+        sudo mkfs.xfs -m reflink=1 "$EBS_DEVICE"
+    else
+        echo "  $EBS_DEVICE already formatted as $FS_TYPE, skipping format"
+    fi
+
+    # Get UUID for stable fstab entry (device names change across reboots)
+    EBS_UUID=$(blkid -o value -s UUID "$EBS_DEVICE")
+    if [ -z "$EBS_UUID" ]; then
+        echo "  ERROR: cannot determine UUID for $EBS_DEVICE" >&2
+        exit 1
+    fi
+
+    FSTAB_ENTRY="UUID=${EBS_UUID} /workspace xfs defaults,nofail 0 2"
+    if grep -qsE '\s/workspace\s' /etc/fstab; then
+        echo "  /workspace already in /etc/fstab, replacing ..."
+        sudo sed -i '\| /workspace |d' /etc/fstab
+    fi
+    echo "$FSTAB_ENTRY" | sudo tee -a /etc/fstab >/dev/null
+    echo "  added fstab entry: $FSTAB_ENTRY"
+
+elif [ -n "$EFS_ID" ]; then
+    # EFS volume: mount via NFS with efs-utils
     if ! command -v mount.efs &>/dev/null; then
         echo "  installing amazon-efs-utils from source ..."
         sudo apt-get update
