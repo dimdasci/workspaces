@@ -66,6 +66,9 @@ Commands:
   refresh <id>
       Regenerate override and .env files (after branch switch or config change).
 
+  shell <id>
+      Open a shell in session context (cd, source .session.env, rename tmux window).
+
   exec <id> <command...>
       Run a command in session context (sources .session.env).
 
@@ -1025,6 +1028,25 @@ cmd_refresh() {
 
 # ── Subcommand: exec ─────────────────────────────────────────────────────────
 
+cmd_shell() {
+    local session_id="${1:-}"
+    [ -n "$session_id" ] || die "session ID required"
+
+    local session_dir="${SESSIONS_DIR}/${session_id}"
+    [ -d "$session_dir" ] || die "session directory not found: $session_dir"
+    [ -f "${session_dir}/.session.env" ] || die "session env not found (was session created properly?)"
+
+    # Rename tmux window if inside tmux
+    if [ -n "${TMUX:-}" ]; then
+        tmux rename-window "$session_id"
+    fi
+
+    # Start a login shell in session context
+    cd "$session_dir"
+    set -a && source .session.env && set +a
+    exec bash -l
+}
+
 cmd_exec() {
     local session_id="${1:-}"
     shift || true
@@ -1065,6 +1087,7 @@ main() {
         status)   cmd_status "$@" ;;
         services) cmd_services "$@" ;;
         refresh)  cmd_refresh "$@" ;;
+        shell)    cmd_shell "$@" ;;
         exec)     cmd_exec "$@" ;;
         env)      cmd_env "$@" ;;
         help|-h|--help) usage ;;
