@@ -134,6 +134,181 @@ No port conflicts — container ports are not published to the host. DevPod tunn
 
 ---
 
+## Parallel agent sessions
+
+Run 2-4 Claude Code agents in parallel on the same repo, each with isolated filesystem and Docker services. See `docs/multi-agent-sessions.md` for the full design.
+
+### Setup for a new project
+
+**Step 1: Clone the project as a reference repo**
+
+```bash
+git clone https://github.com/org/myproject.git /workspace/repos/myproject
+cd /workspace/repos/myproject && git config gc.auto 0
+```
+
+`gc.auto=0` prevents garbage collection from removing objects that session clones share via alternates.
+
+**Step 2: Inspect the project's Docker setup**
+
+Find the compose file and note:
+- Service names and their `container_name:` values
+- Network name and whether it's `external: true`
+- Volumes with explicit `name:` fields
+- Which `.env` files reference services by container name
+
+```bash
+cat docker-compose.yml
+cat backend/.env.example   # or wherever the env template is
+```
+
+**Step 3: Write `.ws-sessions.yml`**
+
+Create this file in the project repo root. It maps the project's Docker services to session-aware names.
+
+```yaml
+compose_file: docker-compose.yml
+
+services:
+  postgres:
+    container_name: myapp-postgres
+  meilisearch:
+    container_name: myapp-meilisearch
+  minio:
+    container_name: myapp-minio
+  mailpit:
+    container_name: myapp-mailpit
+
+network:
+  name: myapp-network
+  external: true
+
+volumes:
+  pgdata:
+    name: myapp-pgdata       # only if the compose file uses explicit name:
+
+env_files:
+  - path: backend/.env
+    template: backend/.env.example
+    vars:
+      DATABASE_URL: "postgresql://user:pass@{postgres}:5432/mydb"
+      MEILISEARCH_URL: "http://{meilisearch}:7700"
+      DOCUMENTS_S3_ENDPOINT: "http://{minio}:9000"
+      SMTP_URL: "smtp://{mailpit}:1025"
+      PORT: "{backend_port}"
+
+processes:
+  backend:
+    port_env: PORT
+    default_port: 3000
+  frontend:
+    port_env: VITE_PORT
+    default_port: 5173
+
+bootstrap:
+  pre: "pnpm install"
+  post: "pnpm db:migrate && pnpm db:seed"
+  skip_scripts: ["scripts/dev.sh"]
+```
+
+Commit this file to the project repo (or keep it in your reference clone if you don't control the repo).
+
+**Step 4: Create sessions**
+
+```bash
+# Planner — repo clone only, no services
+ws-session create planner --project /workspace/repos/myproject --no-services
+
+# Developer — full stack
+ws-session create dev --project /workspace/repos/myproject
+
+# QA — services + backend, no frontend dev servers
+ws-session create qa --project /workspace/repos/myproject
+```
+
+Each session gets:
+- Independent git clone at `/workspace/sessions/<id>/`
+- Docker services with prefixed container names on a dedicated network
+- Generated `.env` files with correct service hostnames
+- CLAUDE.md with session context injected
+
+**Step 5 (optional): Enable peer-to-peer messaging**
+
+If you want agents to send messages to each other (e.g., developer tells QA "feature ready, check table X"), enable claude-peers-mcp:
+
+```bash
+export WS_PEERS=1
+```
+
+Prerequisites (one-time, in devcontainer image or postCreate.sh):
+- Bun: `curl -fsSL https://bun.sh/install | bash`
+- claude-peers-mcp: `git clone https://github.com/louislva/claude-peers-mcp /workspace/.tools/claude-peers-mcp && cd /workspace/.tools/claude-peers-mcp && bun install`
+- Register MCP server: `claude mcp add --scope user --transport stdio claude-peers -- bun /workspace/.tools/claude-peers-mcp/server.ts`
+
+When `WS_PEERS=1`, the orchestrator auto-starts the broker on first session creation. When unset, everything works normally without messaging.
+
+**Step 6: Launch agents**
+
+```bash
+# In tmux, create panes for each agent
+cd /workspace/sessions/planner && claude
+cd /workspace/sessions/dev && claude
+cd /workspace/sessions/qa && claude
+
+# With peer messaging, add the channel flag:
+cd /workspace/sessions/dev && claude --dangerously-load-development-channels server:claude-peers
+```
+
+Agents must start from their session directory so Claude Code reads the session-aware CLAUDE.md.
+
+**Step 7: Verify**
+
+```bash
+ws-session list
+# SESSION   STATUS    SERVICES  PORTS
+# planner   ready     -         -
+# dev       running   4/4       backend:3000 frontend:5173
+# qa        running   4/4       backend:3100
+
+# Check services are up
+ws-session status dev
+
+# QA can inspect developer's database
+ws-session exec qa -- psql "postgresql://user:pass@dev-myapp-postgres:5432/mydb"
+```
+
+### Day-to-day operations
+
+```bash
+# Switch branch in a session
+cd /workspace/sessions/dev && git checkout feature-branch
+ws-session refresh dev          # regenerate override if compose file changed
+
+# Restart services after a crash
+ws-session services dev restart
+
+# Tear down a session
+ws-session destroy qa
+
+# Run a command in session context (sources .session.env automatically)
+ws-session exec dev pnpm test
+```
+
+### What to put in `.ws-sessions.yml` (cheat sheet)
+
+| Look at | Write in config |
+|---|---|
+| `container_name:` in docker-compose.yml | `services.<svc>.container_name` |
+| `networks:` with `name:` or `external: true` | `network.name`, `network.external` |
+| `volumes:` with explicit `name:` field | `volumes.<vol>.name` |
+| `.env` files that reference service hostnames | `env_files[].vars` with `{service}` placeholders |
+| Dev server commands and their port env vars | `processes` |
+| Setup scripts that hardcode container names | `bootstrap.skip_scripts` |
+
+If the project's compose file uses default names (no explicit `container_name:`, no explicit volume `name:`, no `external: true` network), the config is minimal — just the env file mappings.
+
+---
+
 ## Destroying and recreating
 
 ```bash

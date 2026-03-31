@@ -98,6 +98,11 @@ if [ -f /workspace/.tmux.conf ]; then
     ln -sf /workspace/.tmux.conf "${HOME}/.tmux.conf"
 fi
 
+# ─── Session orchestrator ────────────────────────────────────────────────────
+echo "==> Setting up session orchestrator"
+mkdir -p /workspace/sessions /workspace/repos
+ln -sf "$(pwd)/scripts/ws-session" "${HOME}/.local/bin/ws-session"
+
 # =============================================================================
 # Network-dependent installs (each wrapped so one failure doesn't kill the rest)
 # =============================================================================

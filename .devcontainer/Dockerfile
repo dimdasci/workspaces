@@ -75,6 +75,12 @@ RUN ARCH=$(dpkg --print-architecture) \
     && rm /tmp/kasmvnc.deb \
     && rm -rf /var/lib/apt/lists/*
 
+# yq — YAML processor (ws-session config parsing)
+RUN ARCH=$(dpkg --print-architecture) \
+    && curl -fsSL -o /usr/local/bin/yq \
+        "https://github.com/mikefarah/yq/releases/latest/download/yq_linux_${ARCH}" \
+    && chmod +x /usr/local/bin/yq
+
 # Locale
 RUN sed -i 's/# en_US.UTF-8 UTF-8/en_US.UTF-8 UTF-8/' /etc/locale.gen \
     && locale-gen

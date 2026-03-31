@@ -8,8 +8,10 @@ The workspace is designed for VPS, AWS EC2, and similar environments. It must pr
 
 # Project structure
 - `.devcontainer/` — Dockerfile, devcontainer.json, postCreate.sh, KasmVNC config. Consumed by DevPod.
+- `scripts/ws-session` — multi-agent session orchestrator (isolated clones, Docker services, port allocation)
 - `host-setup.sh` — one-time remote host preparation (Docker, firewall, chezmoi)
 - `docs/manual.md` — usage manual
+- `docs/multi-agent-sessions.md` — design doc for parallel agent sessions
 
 # Key decisions
 - DevPod deploys devcontainer on remote machines via SSH provider
@@ -17,6 +19,7 @@ The workspace is designed for VPS, AWS EC2, and similar environments. It must pr
 - Chezmoi + age for secrets and dotfiles (separate private repo)
 - Persistent storage at /workspace (EFS on AWS, local disk on VPS)
 - SSH tunnel for KasmVNC access (port 8443 not exposed)
+- Parallel agent sessions via ws-session: isolated git clones (--reference, no worktrees), per-session Docker Compose overrides, port allocation for app processes
 
 # Container mount layout
 - DevPod mounts repo source to `/workspaces/ec2-ws` (default, do NOT override with workspaceFolder or workspaceMount)

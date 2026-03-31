@@ -1,0 +1,1068 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# =============================================================================
+# ws-session — Multi-agent session orchestrator
+#
+# Creates isolated development sessions inside a single devcontainer.
+# Each session gets: independent git clone, Docker Compose override with
+# prefixed container/network/volume names, generated .env files, port
+# allocation for application processes.
+#
+# See docs/multi-agent-sessions.md for design details.
+# =============================================================================
+
+# ── Constants ────────────────────────────────────────────────────────────────
+
+SESSIONS_DIR="/workspace/sessions"
+REPOS_DIR="/workspace/repos"
+REGISTRY="${SESSIONS_DIR}/registry.json"
+LOCKFILE="${SESSIONS_DIR}/.registry.lock"
+MAX_ID_LEN=20
+ID_REGEX='^[a-z][a-z0-9-]*$'
+PORT_STRIDE=100
+PORT_MAX_BUMP=10
+WS_CONFIG=".ws-sessions.yml"
+CLAUDE_MD_BEGIN="# === ws-session BEGIN ==="
+CLAUDE_MD_END="# === ws-session END ==="
+
+# ── Utilities ────────────────────────────────────────────────────────────────
+
+log()  { echo "ws-session: $*" >&2; }
+die()  { log "ERROR: $*"; exit 1; }
+warn() { log "WARN: $*"; }
+
+require_cmd() {
+    local cmd
+    for cmd in "$@"; do
+        command -v "$cmd" >/dev/null 2>&1 || die "required command not found: $cmd"
+    done
+}
+
+ensure_dirs() {
+    mkdir -p "$SESSIONS_DIR" "$REPOS_DIR"
+}
+
+usage() {
+    cat <<'EOF'
+Usage: ws-session <command> [options]
+
+Commands:
+  create <id> --project <path|url> [--no-services] [--ref <branch>]
+      Create an isolated session with git clone, Docker services, and .env files.
+
+  destroy <id> [--keep-volumes]
+      Tear down a session: stop services, remove clone, free registry slot.
+
+  list
+      Show all sessions with status, services, and ports.
+
+  status <id>
+      Show detailed status for a session.
+
+  services <id> start|stop|restart
+      Manage Docker services for a session.
+
+  refresh <id>
+      Regenerate override and .env files (after branch switch or config change).
+
+  exec <id> <command...>
+      Run a command in session context (sources .session.env).
+
+  env <id>
+      Print session environment variables.
+
+EOF
+}
+
+# ── Registry ─────────────────────────────────────────────────────────────────
+# JSON file at /workspace/sessions/registry.json, protected by flock.
+# Format: {"sessions": {...}, "next_index": N}
+
+with_registry_lock() {
+    local lockfd=9
+    eval "exec $lockfd>\"$LOCKFILE\""
+    flock -w 5 $lockfd || die "cannot acquire registry lock"
+    "$@"
+    eval "exec $lockfd>&-"
+}
+
+registry_init() {
+    [ -f "$REGISTRY" ] && return 0
+    echo '{"sessions":{},"next_index":0}' > "$REGISTRY"
+}
+
+registry_read() {
+    registry_init
+    cat "$REGISTRY"
+}
+
+registry_write() {
+    local content="$1"
+    echo "$content" > "${REGISTRY}.tmp"
+    mv "${REGISTRY}.tmp" "$REGISTRY"
+}
+
+registry_get_session() {
+    local id="$1"
+    registry_read | jq -e ".sessions[\"$id\"]" 2>/dev/null
+}
+
+registry_session_exists() {
+    local id="$1"
+    registry_read | jq -e ".sessions[\"$id\"]" >/dev/null 2>&1
+}
+
+registry_next_index() {
+    registry_read | jq -r '.next_index'
+}
+
+registry_add_session() {
+    local id="$1" entry="$2"
+    local current next_idx
+    current=$(registry_read)
+    next_idx=$(echo "$current" | jq -r '.next_index')
+    local updated
+    updated=$(echo "$current" | jq \
+        --arg id "$id" \
+        --argjson entry "$entry" \
+        --argjson next "$((next_idx + 1))" \
+        '.sessions[$id] = $entry | .next_index = $next')
+    registry_write "$updated"
+}
+
+registry_update_session() {
+    local id="$1" entry="$2"
+    local current
+    current=$(registry_read)
+    local updated
+    updated=$(echo "$current" | jq \
+        --arg id "$id" \
+        --argjson entry "$entry" \
+        '.sessions[$id] = $entry')
+    registry_write "$updated"
+}
+
+registry_remove_session() {
+    local id="$1"
+    local current
+    current=$(registry_read)
+    local updated
+    updated=$(echo "$current" | jq --arg id "$id" 'del(.sessions[$id])')
+    registry_write "$updated"
+}
+
+registry_list_ids() {
+    registry_read | jq -r '.sessions | keys[]' 2>/dev/null
+}
+
+# ── YAML Config ──────────────────────────────────────────────────────────────
+# Reads .ws-sessions.yml from session repo via yq.
+
+config_file_path() {
+    echo "$1/${WS_CONFIG}"
+}
+
+config_exists() {
+    [ -f "$(config_file_path "$1")" ]
+}
+
+# All config_* functions take $session_dir as first arg.
+# Returns empty/defaults when config file is missing.
+
+_yq() {
+    local session_dir="$1" expr="$2"
+    local cfg
+    cfg=$(config_file_path "$session_dir")
+    if [ -f "$cfg" ]; then
+        yq eval "$expr" "$cfg"
+    else
+        echo ""
+    fi
+}
+
+_yq_raw() {
+    local session_dir="$1" expr="$2"
+    local result
+    result=$(_yq "$session_dir" "$expr")
+    # yq outputs "null" for missing keys
+    if [ "$result" = "null" ] || [ -z "$result" ]; then
+        echo ""
+    else
+        echo "$result"
+    fi
+}
+
+config_compose_file() {
+    local val
+    val=$(_yq_raw "$1" '.compose_file')
+    echo "${val:-docker-compose.yml}"
+}
+
+config_services() {
+    local session_dir="$1"
+    if ! config_exists "$session_dir"; then return; fi
+    _yq "$session_dir" '.services | keys | .[]' 2>/dev/null | grep -v '^null$' || true
+}
+
+config_service_container_name() {
+    _yq_raw "$1" ".services.\"$2\".container_name"
+}
+
+config_network_name() {
+    local val
+    val=$(_yq_raw "$1" '.network.name')
+    echo "${val:-default}"
+}
+
+config_network_external() {
+    local val
+    val=$(_yq_raw "$1" '.network.external')
+    echo "${val:-false}"
+}
+
+config_volumes() {
+    local session_dir="$1"
+    if ! config_exists "$session_dir"; then return; fi
+    _yq "$session_dir" '.volumes | keys | .[]' 2>/dev/null | grep -v '^null$' || true
+}
+
+config_volume_name() {
+    _yq_raw "$1" ".volumes.\"$2\".name"
+}
+
+config_env_files_count() {
+    local val
+    val=$(_yq_raw "$1" '.env_files | length')
+    echo "${val:-0}"
+}
+
+config_env_file_path() {
+    _yq_raw "$1" ".env_files[$2].path"
+}
+
+config_env_file_template() {
+    _yq_raw "$1" ".env_files[$2].template"
+}
+
+config_env_file_vars() {
+    local session_dir="$1" idx="$2"
+    if ! config_exists "$session_dir"; then return; fi
+    _yq "$session_dir" ".env_files[$idx].vars | to_entries | .[] | .key + \"=\" + .value" 2>/dev/null || true
+}
+
+config_processes() {
+    local session_dir="$1"
+    if ! config_exists "$session_dir"; then return; fi
+    _yq "$session_dir" '.processes | keys | .[]' 2>/dev/null | grep -v '^null$' || true
+}
+
+config_process_default_port() {
+    _yq_raw "$1" ".processes.\"$2\".default_port"
+}
+
+config_process_port_env() {
+    _yq_raw "$1" ".processes.\"$2\".port_env"
+}
+
+config_bootstrap_pre() {
+    _yq_raw "$1" '.bootstrap.pre'
+}
+
+config_bootstrap_post() {
+    _yq_raw "$1" '.bootstrap.post'
+}
+
+# ── Port Allocation ──────────────────────────────────────────────────────────
+
+port_in_use() {
+    ss -tlnp 2>/dev/null | grep -q ":${1} " 2>/dev/null
+}
+
+allocate_port() {
+    local default_port="$1" session_index="$2"
+    local candidate=$(( default_port + (session_index * PORT_STRIDE) ))
+    local attempts=0
+    while port_in_use "$candidate" && [ $attempts -lt $PORT_MAX_BUMP ]; do
+        candidate=$((candidate + 1))
+        attempts=$((attempts + 1))
+    done
+    if [ $attempts -ge $PORT_MAX_BUMP ]; then
+        die "cannot find free port near $((default_port + session_index * PORT_STRIDE))"
+    fi
+    echo "$candidate"
+}
+
+# ── Generation ───────────────────────────────────────────────────────────────
+
+generate_compose_override() {
+    local session_id="$1" session_dir="$2"
+    local compose_file override_file
+    compose_file=$(config_compose_file "$session_dir")
+    override_file="${session_dir}/docker-compose.override.yml"
+
+    local services_block="" volumes_block="" networks_block=""
+    local svc container_name
+
+    # Services: remap container_name
+    for svc in $(config_services "$session_dir"); do
+        container_name=$(config_service_container_name "$session_dir" "$svc")
+        if [ -z "$container_name" ]; then continue; fi
+        services_block+="  ${svc}:
+    container_name: ${session_id}-${container_name}
+"
+        # Check if this service has a build: directive — add image: to prevent tag collision
+        local has_build
+        has_build=$(yq eval ".services.\"${svc}\".build" "${session_dir}/${compose_file}" 2>/dev/null || echo "null")
+        if [ "$has_build" != "null" ] && [ -n "$has_build" ]; then
+            services_block+="    image: ${session_id}-${svc}:latest
+"
+        fi
+    done
+
+    # Volumes: remap explicit names
+    for vol in $(config_volumes "$session_dir"); do
+        local vol_name
+        vol_name=$(config_volume_name "$session_dir" "$vol")
+        if [ -z "$vol_name" ]; then continue; fi
+        volumes_block+="  ${vol}:
+    name: ${session_id}-${vol_name}
+"
+    done
+
+    # Network: remap name, force external: false
+    local net_name
+    net_name=$(config_network_name "$session_dir")
+    if [ "$net_name" != "default" ] && [ -n "$net_name" ]; then
+        networks_block+="  ${net_name}:
+    name: ${session_id}-${net_name}
+    external: false
+"
+    fi
+
+    # Write override file
+    {
+        echo "# AUTO-GENERATED by ws-session. Do not edit."
+        if [ -n "$services_block" ]; then
+            echo "services:"
+            echo "$services_block"
+        fi
+        if [ -n "$volumes_block" ]; then
+            echo "volumes:"
+            echo "$volumes_block"
+        fi
+        if [ -n "$networks_block" ]; then
+            echo "networks:"
+            echo "$networks_block"
+        fi
+    } > "$override_file"
+
+    log "generated ${override_file}"
+}
+
+generate_session_env() {
+    local session_id="$1" session_dir="$2" session_index="$3" ports_json="$4"
+    local env_file="${session_dir}/.session.env"
+
+    {
+        echo "# AUTO-GENERATED by ws-session. Do not edit."
+        echo "SESSION_ID=${session_id}"
+        echo "SESSION_INDEX=${session_index}"
+        echo "SESSION_REPO=${session_dir}"
+        echo "COMPOSE_PROJECT_NAME=${session_id}"
+        echo ""
+        echo "# Docker service hostnames (remapped container names)"
+    } > "$env_file"
+
+    local svc container_name env_var_name
+    for svc in $(config_services "$session_dir"); do
+        container_name=$(config_service_container_name "$session_dir" "$svc")
+        if [ -z "$container_name" ]; then continue; fi
+        env_var_name="WS_$(echo "$svc" | tr '[:lower:]-' '[:upper:]_')"
+        echo "${env_var_name}=${session_id}-${container_name}" >> "$env_file"
+    done
+
+    echo "" >> "$env_file"
+    echo "# Process ports" >> "$env_file"
+
+    local proc port_env port_val
+    for proc in $(config_processes "$session_dir"); do
+        port_env=$(config_process_port_env "$session_dir" "$proc")
+        if [ -z "$port_env" ]; then continue; fi
+        port_val=$(echo "$ports_json" | jq -r ".\"$proc\" // empty")
+        if [ -n "$port_val" ]; then
+            echo "${port_env}=${port_val}" >> "$env_file"
+        fi
+    done
+
+    log "generated ${env_file}"
+}
+
+generate_project_env_files() {
+    local session_id="$1" session_dir="$2" ports_json="$3"
+    local count
+    count=$(config_env_files_count "$session_dir")
+    [ "$count" -gt 0 ] 2>/dev/null || return 0
+
+    local i env_path template_path
+    for (( i=0; i<count; i++ )); do
+        env_path=$(config_env_file_path "$session_dir" "$i")
+        template_path=$(config_env_file_template "$session_dir" "$i")
+        [ -n "$env_path" ] || continue
+
+        local full_env="${session_dir}/${env_path}"
+        local full_template="${session_dir}/${template_path:-$env_path.example}"
+
+        # Copy template if target doesn't exist
+        if [ ! -f "$full_env" ] && [ -f "$full_template" ]; then
+            cp "$full_template" "$full_env"
+        fi
+        [ -f "$full_env" ] || { warn "env file not found: $full_env"; continue; }
+
+        # Replace vars
+        local line key value
+        while IFS= read -r line; do
+            [ -z "$line" ] && continue
+            key="${line%%=*}"
+            value="${line#*=}"
+
+            # Replace {service} placeholders with session-prefixed container names
+            local svc container_name
+            for svc in $(config_services "$session_dir"); do
+                container_name=$(config_service_container_name "$session_dir" "$svc")
+                [ -n "$container_name" ] || continue
+                value="${value//\{$svc\}/${session_id}-${container_name}}"
+            done
+
+            # Replace {process_port} placeholders with allocated ports
+            local proc port_val
+            for proc in $(config_processes "$session_dir"); do
+                port_val=$(echo "$ports_json" | jq -r ".\"$proc\" // empty")
+                [ -n "$port_val" ] || continue
+                value="${value//\{${proc}_port\}/${port_val}}"
+            done
+
+            # Write the var to env file (replace existing line or append)
+            if grep -q "^${key}=" "$full_env" 2>/dev/null; then
+                sed -i "s|^${key}=.*|${key}=${value}|" "$full_env"
+            else
+                echo "${key}=${value}" >> "$full_env"
+            fi
+        done < <(config_env_file_vars "$session_dir" "$i")
+
+        log "generated ${full_env}"
+    done
+}
+
+inject_claude_md() {
+    local session_id="$1" session_dir="$2" ports_json="$3"
+    local claude_md="${session_dir}/CLAUDE.md"
+
+    # Ensure file exists
+    touch "$claude_md"
+
+    # Remove existing ws-session block if present (for refresh)
+    if grep -q "$CLAUDE_MD_BEGIN" "$claude_md" 2>/dev/null; then
+        sed -i "/${CLAUDE_MD_BEGIN}/,/${CLAUDE_MD_END}/d" "$claude_md"
+    fi
+
+    # Build service list
+    local svc_list=""
+    local svc container_name
+    for svc in $(config_services "$session_dir"); do
+        container_name=$(config_service_container_name "$session_dir" "$svc")
+        [ -n "$container_name" ] || continue
+        svc_list+="  ${svc}=${session_id}-${container_name}"$'\n'
+    done
+
+    # Build port list
+    local port_list=""
+    local proc port_env port_val
+    for proc in $(config_processes "$session_dir"); do
+        port_env=$(config_process_port_env "$session_dir" "$proc")
+        port_val=$(echo "$ports_json" | jq -r ".\"$proc\" // empty")
+        [ -n "$port_val" ] || continue
+        port_list+="  ${proc}: localhost:${port_val}"$'\n'
+    done
+
+    # Append block
+    {
+        echo ""
+        echo "$CLAUDE_MD_BEGIN"
+        echo "# Session Context (auto-generated by ws-session)"
+        echo "- Session ID: ${session_id}"
+        echo "- Repo: ${session_dir}"
+        if [ -n "$svc_list" ]; then
+            echo "- Services (use these as hostnames in this session):"
+            echo -n "$svc_list"
+        fi
+        if [ -n "$port_list" ]; then
+            echo "- Ports:"
+            echo -n "$port_list"
+        fi
+        echo "- Do NOT run project bootstrap scripts directly (they may hardcode container names)."
+        echo "  Use: ws-session exec ${session_id} <cmd>  or  source .session.env first."
+        echo "$CLAUDE_MD_END"
+    } >> "$claude_md"
+
+    # Exclude injected CLAUDE.md changes from git
+    local exclude_file="${session_dir}/.git/info/exclude"
+    mkdir -p "$(dirname "$exclude_file")"
+    if ! grep -q "ws-session" "$exclude_file" 2>/dev/null; then
+        echo "# ws-session generated files" >> "$exclude_file"
+        echo ".session.env" >> "$exclude_file"
+        echo "docker-compose.override.yml" >> "$exclude_file"
+    fi
+
+    log "injected session context into CLAUDE.md"
+}
+
+# ── Docker Operations ────────────────────────────────────────────────────────
+
+compose_up() {
+    local session_id="$1" session_dir="$2"
+    log "starting services for ${session_id}..."
+    if (cd "$session_dir" && docker compose -p "$session_id" up -d --wait 2>&1); then
+        return 0
+    else
+        warn "some services may not be healthy (check: ws-session status $session_id)"
+        return 1
+    fi
+}
+
+compose_down() {
+    local session_id="$1" session_dir="$2" keep_volumes="${3:-false}"
+    log "stopping services for ${session_id}..."
+    if [ "$keep_volumes" = "true" ]; then
+        (cd "$session_dir" && docker compose -p "$session_id" down --remove-orphans 2>&1) || true
+    else
+        (cd "$session_dir" && docker compose -p "$session_id" down --volumes --remove-orphans 2>&1) || true
+    fi
+}
+
+compose_status() {
+    local session_id="$1" session_dir="$2"
+    (cd "$session_dir" && docker compose -p "$session_id" ps 2>/dev/null) || true
+}
+
+compose_service_count() {
+    local session_id="$1" session_dir="$2"
+    local total running
+    total=$(cd "$session_dir" && docker compose -p "$session_id" ps --format json 2>/dev/null | jq -s 'length') || echo "0"
+    running=$(cd "$session_dir" && docker compose -p "$session_id" ps --format json 2>/dev/null | jq -s '[.[] | select(.State == "running")] | length') || echo "0"
+    echo "${running}/${total}"
+}
+
+network_connect() {
+    local network="$1"
+    local container_id
+    container_id=$(hostname)
+    docker network connect "$network" "$container_id" 2>/dev/null || true
+}
+
+network_disconnect() {
+    local network="$1"
+    local container_id
+    container_id=$(hostname)
+    docker network disconnect "$network" "$container_id" 2>/dev/null || true
+}
+
+# ── Peers (optional) ────────────────────────────────────────────────────────
+
+maybe_start_peers_broker() {
+    [ "${WS_PEERS:-0}" = "1" ] || return 0
+    command -v bun >/dev/null 2>&1 || { warn "WS_PEERS=1 but bun not found, skipping peers broker"; return 0; }
+    pgrep -f "claude-peers" >/dev/null 2>&1 && return 0
+    local peers_dir="/workspace/.tools/claude-peers-mcp"
+    [ -d "$peers_dir" ] || { warn "claude-peers-mcp not found at ${peers_dir}, skipping"; return 0; }
+    nohup bun "${peers_dir}/broker.ts" >/dev/null 2>&1 &
+    log "started claude-peers broker (pid $!)"
+}
+
+# ── Subcommand: create ───────────────────────────────────────────────────────
+
+cmd_create() {
+    local session_id="" project="" no_services=false ref_branch=""
+
+    # Parse args
+    session_id="${1:-}"
+    shift || true
+    [ -n "$session_id" ] || { usage; die "session ID required"; }
+
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --project)    project="${2:-}"; shift 2 ;;
+            --no-services) no_services=true; shift ;;
+            --ref)        ref_branch="${2:-}"; shift 2 ;;
+            *)            die "unknown option: $1" ;;
+        esac
+    done
+
+    [ -n "$project" ] || die "--project is required"
+
+    # Validate session ID
+    [ ${#session_id} -le $MAX_ID_LEN ] || die "session ID too long (max ${MAX_ID_LEN} chars)"
+    [[ "$session_id" =~ $ID_REGEX ]] || die "session ID must be lowercase alphanumeric with hyphens, starting with a letter"
+
+    # Check uniqueness
+    if registry_session_exists "$session_id"; then
+        die "session '$session_id' already exists"
+    fi
+
+    # Allocate index under lock
+    local session_index
+    session_index=$(with_registry_lock registry_next_index)
+
+    # Reserve slot in registry
+    local placeholder
+    placeholder=$(jq -n \
+        --arg id "$session_id" \
+        --arg project "$project" \
+        --argjson index "$session_index" \
+        '{project: $project, index: $index, status: "creating", created_at: (now | todate)}')
+    with_registry_lock registry_add_session "$session_id" "$placeholder"
+
+    # Cleanup trap
+    cleanup_failed_create() {
+        warn "create failed, cleaning up..."
+        docker compose -p "$session_id" down -v 2>/dev/null || true
+        rm -rf "${SESSIONS_DIR}/${session_id}"
+        with_registry_lock registry_remove_session "$session_id" 2>/dev/null || true
+    }
+    trap cleanup_failed_create ERR
+
+    # Reference repo
+    local project_name ref_repo
+    project_name=$(basename "$project" .git)
+    ref_repo="${REPOS_DIR}/${project_name}"
+
+    if [ ! -d "$ref_repo" ]; then
+        log "cloning reference repo to ${ref_repo}..."
+        git clone "$project" "$ref_repo"
+        git -C "$ref_repo" config gc.auto 0
+    else
+        log "updating reference repo..."
+        git -C "$ref_repo" fetch --all --prune 2>/dev/null || warn "fetch failed (non-fatal)"
+    fi
+
+    # Clone session
+    local session_dir="${SESSIONS_DIR}/${session_id}"
+    log "cloning session to ${session_dir}..."
+    git clone --reference "$ref_repo" "file://${ref_repo}" "$session_dir"
+
+    if [ -n "$ref_branch" ]; then
+        git -C "$session_dir" checkout "$ref_branch"
+    fi
+
+    # Load config and allocate ports
+    local ports_json="{}"
+    local proc default_port allocated_port
+    for proc in $(config_processes "$session_dir"); do
+        default_port=$(config_process_default_port "$session_dir" "$proc")
+        [ -n "$default_port" ] || continue
+        allocated_port=$(allocate_port "$default_port" "$session_index")
+        ports_json=$(echo "$ports_json" | jq --arg p "$proc" --argjson v "$allocated_port" '. + {($p): $v}')
+    done
+
+    # Generate files
+    generate_compose_override "$session_id" "$session_dir"
+    generate_session_env "$session_id" "$session_dir" "$session_index" "$ports_json"
+    generate_project_env_files "$session_id" "$session_dir" "$ports_json"
+
+    # Start services
+    local status="ready"
+    local network_name
+    network_name=$(config_network_name "$session_dir")
+    local session_network="${session_id}-${network_name}"
+
+    if [ "$no_services" = false ]; then
+        # Check if compose file exists
+        local compose_file
+        compose_file=$(config_compose_file "$session_dir")
+        if [ -f "${session_dir}/${compose_file}" ]; then
+            if compose_up "$session_id" "$session_dir"; then
+                status="running"
+            else
+                status="degraded"
+            fi
+            if [ "$network_name" != "default" ]; then
+                network_connect "$session_network"
+            fi
+        else
+            warn "no ${compose_file} found, skipping services"
+        fi
+    fi
+
+    # Bootstrap
+    local bootstrap_pre bootstrap_post
+    bootstrap_pre=$(config_bootstrap_pre "$session_dir")
+    bootstrap_post=$(config_bootstrap_post "$session_dir")
+
+    if [ -n "$bootstrap_pre" ]; then
+        log "running bootstrap.pre..."
+        (cd "$session_dir" && source .session.env && eval "$bootstrap_pre") || warn "bootstrap.pre failed"
+    fi
+
+    if [ -n "$bootstrap_post" ] && [ "$status" != "ready" ]; then
+        log "running bootstrap.post..."
+        (cd "$session_dir" && source .session.env && eval "$bootstrap_post") || warn "bootstrap.post failed"
+    fi
+
+    # Agent integration
+    inject_claude_md "$session_id" "$session_dir" "$ports_json"
+
+    # Peers
+    maybe_start_peers_broker
+
+    # Build service map for registry
+    local services_json="{}"
+    local svc container_name
+    for svc in $(config_services "$session_dir"); do
+        container_name=$(config_service_container_name "$session_dir" "$svc")
+        [ -n "$container_name" ] || continue
+        services_json=$(echo "$services_json" | jq \
+            --arg s "$svc" --arg n "${session_id}-${container_name}" \
+            '. + {($s): $n}')
+    done
+
+    # Finalize registry
+    local entry
+    entry=$(jq -n \
+        --arg project "$project" \
+        --argjson index "$session_index" \
+        --arg repo_path "$session_dir" \
+        --arg reference_repo "$ref_repo" \
+        --arg compose_project "$session_id" \
+        --arg network "$session_network" \
+        --arg status "$status" \
+        --arg created_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+        --argjson ports "$ports_json" \
+        --argjson services "$services_json" \
+        '{
+            project: $project,
+            index: $index,
+            repo_path: $repo_path,
+            reference_repo: $reference_repo,
+            compose_project: $compose_project,
+            network: $network,
+            status: $status,
+            created_at: $created_at,
+            ports: $ports,
+            services: $services
+        }')
+    with_registry_lock registry_update_session "$session_id" "$entry"
+
+    trap - ERR
+
+    # Summary
+    echo ""
+    echo "Session created: ${session_id}"
+    echo "  Repo:     ${session_dir}"
+    echo "  Status:   ${status}"
+    if [ "$ports_json" != "{}" ]; then
+        echo "  Ports:    $(echo "$ports_json" | jq -r 'to_entries | map(.key + ":" + (.value | tostring)) | join("  ")')"
+    fi
+    if [ "$services_json" != "{}" ]; then
+        echo "  Services: $(echo "$services_json" | jq -r 'to_entries | map(.key + "=" + .value) | join("  ")')"
+    fi
+    echo ""
+}
+
+# ── Subcommand: destroy ──────────────────────────────────────────────────────
+
+cmd_destroy() {
+    local session_id="${1:-}"
+    shift || true
+    [ -n "$session_id" ] || die "session ID required"
+
+    local keep_volumes=false
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --keep-volumes) keep_volumes=true; shift ;;
+            *)              die "unknown option: $1" ;;
+        esac
+    done
+
+    local session_dir="${SESSIONS_DIR}/${session_id}"
+
+    # Stop services if compose file exists
+    if [ -d "$session_dir" ]; then
+        local compose_file
+        compose_file=$(config_compose_file "$session_dir" 2>/dev/null || echo "docker-compose.yml")
+        if [ -f "${session_dir}/${compose_file}" ] || [ -f "${session_dir}/docker-compose.override.yml" ]; then
+            compose_down "$session_id" "$session_dir" "$keep_volumes"
+        fi
+    fi
+
+    # Disconnect from network
+    if registry_session_exists "$session_id"; then
+        local network
+        network=$(registry_get_session "$session_id" | jq -r '.network // empty')
+        if [ -n "$network" ]; then
+            network_disconnect "$network"
+        fi
+    fi
+
+    # Remove session directory
+    if [ -d "$session_dir" ]; then
+        rm -rf "$session_dir"
+        log "removed ${session_dir}"
+    fi
+
+    # Update registry
+    with_registry_lock registry_remove_session "$session_id"
+    log "session '${session_id}' destroyed"
+}
+
+# ── Subcommand: list ─────────────────────────────────────────────────────────
+
+cmd_list() {
+    registry_init
+    local ids
+    ids=$(registry_list_ids)
+
+    if [ -z "$ids" ]; then
+        echo "No sessions."
+        return
+    fi
+
+    printf "%-15s %-12s %-10s %s\n" "SESSION" "STATUS" "SERVICES" "PORTS"
+    printf "%-15s %-12s %-10s %s\n" "-------" "------" "--------" "-----"
+
+    local id entry status ports_str svc_count
+    while IFS= read -r id; do
+        entry=$(registry_get_session "$id")
+        status=$(echo "$entry" | jq -r '.status')
+        ports_str=$(echo "$entry" | jq -r '.ports // {} | to_entries | map(.key + ":" + (.value | tostring)) | join(" ")' 2>/dev/null)
+
+        # Check actual service status
+        local session_dir
+        session_dir=$(echo "$entry" | jq -r '.repo_path')
+        if [ "$status" = "running" ] || [ "$status" = "degraded" ]; then
+            if [ -d "$session_dir" ]; then
+                svc_count=$(compose_service_count "$id" "$session_dir" 2>/dev/null || echo "-")
+            else
+                svc_count="-"
+                status="stale"
+            fi
+        else
+            svc_count="-"
+        fi
+
+        printf "%-15s %-12s %-10s %s\n" "$id" "$status" "$svc_count" "$ports_str"
+    done <<< "$ids"
+}
+
+# ── Subcommand: status ───────────────────────────────────────────────────────
+
+cmd_status() {
+    local session_id="${1:-}"
+    [ -n "$session_id" ] || die "session ID required"
+
+    if ! registry_session_exists "$session_id"; then
+        die "session '$session_id' not found"
+    fi
+
+    local entry session_dir
+    entry=$(registry_get_session "$session_id")
+    session_dir=$(echo "$entry" | jq -r '.repo_path')
+
+    echo "Session: ${session_id}"
+    echo "  Project:    $(echo "$entry" | jq -r '.project')"
+    echo "  Status:     $(echo "$entry" | jq -r '.status')"
+    echo "  Repo:       ${session_dir}"
+    echo "  Created:    $(echo "$entry" | jq -r '.created_at')"
+
+    if [ -d "$session_dir" ]; then
+        local branch
+        branch=$(git -C "$session_dir" branch --show-current 2>/dev/null || echo "detached")
+        echo "  Branch:     ${branch}"
+    fi
+
+    echo "  Network:    $(echo "$entry" | jq -r '.network')"
+
+    local ports
+    ports=$(echo "$entry" | jq -r '.ports // {} | to_entries | map("    " + .key + ": " + (.value | tostring)) | .[]' 2>/dev/null)
+    if [ -n "$ports" ]; then
+        echo "  Ports:"
+        echo "$ports"
+    fi
+
+    local services
+    services=$(echo "$entry" | jq -r '.services // {} | to_entries | map("    " + .key + " = " + .value) | .[]' 2>/dev/null)
+    if [ -n "$services" ]; then
+        echo "  Services:"
+        echo "$services"
+    fi
+
+    # Docker compose status
+    local status
+    status=$(echo "$entry" | jq -r '.status')
+    if [ "$status" = "running" ] || [ "$status" = "degraded" ]; then
+        echo ""
+        echo "Docker containers:"
+        compose_status "$session_id" "$session_dir"
+    fi
+}
+
+# ── Subcommand: services ─────────────────────────────────────────────────────
+
+cmd_services() {
+    local session_id="${1:-}"
+    local action="${2:-}"
+    [ -n "$session_id" ] || die "session ID required"
+    [ -n "$action" ] || die "action required: start|stop|restart"
+
+    if ! registry_session_exists "$session_id"; then
+        die "session '$session_id' not found"
+    fi
+
+    local entry session_dir
+    entry=$(registry_get_session "$session_id")
+    session_dir=$(echo "$entry" | jq -r '.repo_path')
+
+    case "$action" in
+        start)
+            compose_up "$session_id" "$session_dir"
+            local network
+            network=$(echo "$entry" | jq -r '.network // empty')
+            [ -z "$network" ] || network_connect "$network"
+            ;;
+        stop)
+            (cd "$session_dir" && docker compose -p "$session_id" stop 2>&1) || true
+            ;;
+        restart)
+            (cd "$session_dir" && docker compose -p "$session_id" restart 2>&1) || true
+            ;;
+        *)
+            die "unknown action: $action (expected start|stop|restart)"
+            ;;
+    esac
+}
+
+# ── Subcommand: refresh ──────────────────────────────────────────────────────
+
+cmd_refresh() {
+    local session_id="${1:-}"
+    [ -n "$session_id" ] || die "session ID required"
+
+    if ! registry_session_exists "$session_id"; then
+        die "session '$session_id' not found"
+    fi
+
+    local entry session_dir
+    entry=$(registry_get_session "$session_id")
+    session_dir=$(echo "$entry" | jq -r '.repo_path')
+    local session_index
+    session_index=$(echo "$entry" | jq -r '.index')
+
+    [ -d "$session_dir" ] || die "session directory missing: $session_dir"
+
+    # Save old override for comparison
+    local old_override=""
+    if [ -f "${session_dir}/docker-compose.override.yml" ]; then
+        old_override=$(cat "${session_dir}/docker-compose.override.yml")
+    fi
+
+    # Reallocate ports
+    local ports_json="{}"
+    local proc default_port allocated_port
+    for proc in $(config_processes "$session_dir"); do
+        default_port=$(config_process_default_port "$session_dir" "$proc")
+        [ -n "$default_port" ] || continue
+        allocated_port=$(allocate_port "$default_port" "$session_index")
+        ports_json=$(echo "$ports_json" | jq --arg p "$proc" --argjson v "$allocated_port" '. + {($p): $v}')
+    done
+
+    # Regenerate
+    generate_compose_override "$session_id" "$session_dir"
+    generate_session_env "$session_id" "$session_dir" "$session_index" "$ports_json"
+    generate_project_env_files "$session_id" "$session_dir" "$ports_json"
+    inject_claude_md "$session_id" "$session_dir" "$ports_json"
+
+    # Check if override changed — restart services if so
+    local new_override=""
+    if [ -f "${session_dir}/docker-compose.override.yml" ]; then
+        new_override=$(cat "${session_dir}/docker-compose.override.yml")
+    fi
+
+    local status
+    status=$(echo "$entry" | jq -r '.status')
+    if [ "$old_override" != "$new_override" ] && [ "$status" = "running" ] || [ "$status" = "degraded" ]; then
+        log "override changed, restarting services..."
+        compose_down "$session_id" "$session_dir" "true"
+        compose_up "$session_id" "$session_dir"
+    fi
+
+    # Update registry
+    local services_json="{}"
+    local svc container_name
+    for svc in $(config_services "$session_dir"); do
+        container_name=$(config_service_container_name "$session_dir" "$svc")
+        [ -n "$container_name" ] || continue
+        services_json=$(echo "$services_json" | jq \
+            --arg s "$svc" --arg n "${session_id}-${container_name}" \
+            '. + {($s): $n}')
+    done
+
+    local updated_entry
+    updated_entry=$(echo "$entry" | jq \
+        --argjson ports "$ports_json" \
+        --argjson services "$services_json" \
+        '.ports = $ports | .services = $services')
+    with_registry_lock registry_update_session "$session_id" "$updated_entry"
+
+    log "session '${session_id}' refreshed"
+}
+
+# ── Subcommand: exec ─────────────────────────────────────────────────────────
+
+cmd_exec() {
+    local session_id="${1:-}"
+    shift || true
+    [ -n "$session_id" ] || die "session ID required"
+    [ $# -gt 0 ] || die "command required"
+
+    local session_dir="${SESSIONS_DIR}/${session_id}"
+    [ -d "$session_dir" ] || die "session directory not found: $session_dir"
+    [ -f "${session_dir}/.session.env" ] || die "session env not found (was session created properly?)"
+
+    (cd "$session_dir" && set -a && source .session.env && set +a && exec "$@")
+}
+
+# ── Subcommand: env ──────────────────────────────────────────────────────────
+
+cmd_env() {
+    local session_id="${1:-}"
+    [ -n "$session_id" ] || die "session ID required"
+
+    local env_file="${SESSIONS_DIR}/${session_id}/.session.env"
+    [ -f "$env_file" ] || die "session env not found: $env_file"
+    cat "$env_file"
+}
+
+# ── Main ─────────────────────────────────────────────────────────────────────
+
+main() {
+    require_cmd docker jq yq git flock ss
+    ensure_dirs
+
+    local cmd="${1:-}"
+    shift || true
+
+    case "$cmd" in
+        create)   cmd_create "$@" ;;
+        destroy)  cmd_destroy "$@" ;;
+        list)     cmd_list ;;
+        status)   cmd_status "$@" ;;
+        services) cmd_services "$@" ;;
+        refresh)  cmd_refresh "$@" ;;
+        exec)     cmd_exec "$@" ;;
+        env)      cmd_env "$@" ;;
+        help|-h|--help) usage ;;
+        "")       usage ;;
+        *)        die "unknown command: $cmd (try: ws-session help)" ;;
+    esac
+}
+
+main "$@"
