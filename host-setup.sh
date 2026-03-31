@@ -118,7 +118,7 @@ elif [ -n "$EFS_ID" ]; then
         rm -rf /tmp/efs-utils
     fi
 
-    FSTAB_ENTRY="${EFS_ID}.efs.${AWS_REGION}.amazonaws.com:/ /workspace efs _netdev,tls 0 0"
+    FSTAB_ENTRY="${EFS_ID}.efs.${AWS_REGION}.amazonaws.com:/ /workspace efs _netdev,tls,nofail 0 0"
     if grep -qsE '\s/workspace\s' /etc/fstab; then
         echo "  /workspace already in /etc/fstab, updating ..."
         sudo sed -i '\| /workspace |d' /etc/fstab
@@ -235,8 +235,14 @@ apply_sshd_setting PermitRootLogin no
 apply_sshd_setting PasswordAuthentication no
 
 echo "  restarting ssh ..."
-# Ubuntu 24.04+ uses ssh.service; older versions use sshd.service
-sudo systemctl restart ssh 2>/dev/null || sudo systemctl restart sshd
+# Ubuntu 24.04+ uses socket activation (ssh.socket); older versions use ssh.service/sshd.service.
+# Restarting ssh.service alone kills the socket listener — must restart ssh.socket too.
+if systemctl is-active ssh.socket &>/dev/null; then
+    sudo systemctl restart ssh.socket
+    sudo systemctl restart ssh.service 2>/dev/null || true
+else
+    sudo systemctl restart ssh 2>/dev/null || sudo systemctl restart sshd
+fi
 
 # -----------------------------------------------------------------------------
 # 8. Docker memory limits
