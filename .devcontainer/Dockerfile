@@ -81,6 +81,9 @@ RUN ARCH=$(dpkg --print-architecture) \
         "https://github.com/mikefarah/yq/releases/latest/download/yq_linux_${ARCH}" \
     && chmod +x /usr/local/bin/yq
 
+# Bun — runtime for claude-peers-mcp (agent-to-agent messaging)
+RUN curl -fsSL https://bun.sh/install | BUN_INSTALL=/usr/local bash
+
 # Locale
 RUN sed -i 's/# en_US.UTF-8 UTF-8/en_US.UTF-8 UTF-8/' /etc/locale.gen \
     && locale-gen
