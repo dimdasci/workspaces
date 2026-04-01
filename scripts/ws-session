@@ -601,7 +601,7 @@ HOOKEOF
         --arg prompt ".claude/session-context.md" \
         --arg hook_cmd ".claude/hooks/check-localhost.sh" \
         '{
-            userSystemPromptFile: $prompt,
+            appendSystemPromptFile: $prompt,
             hooks: {
                 PreToolUse: [
                     {
