@@ -452,6 +452,30 @@ generate_project_env_files() {
             fi
         done < <(config_env_file_vars "$session_dir" "$i")
 
+        # Merge shared secrets: session-local first, then reference repo, then global
+        local secrets_file
+        for secrets_file in \
+            "${session_dir}/.env.shared" \
+            "/workspace/.env.shared"; do
+            if [ -f "$secrets_file" ]; then
+                local skey sval
+                while IFS= read -r line || [ -n "$line" ]; do
+                    # Skip comments and blank lines
+                    [[ "$line" =~ ^[[:space:]]*# ]] && continue
+                    [ -z "$line" ] && continue
+                    skey="${line%%=*}"
+                    sval="${line#*=}"
+                    if grep -q "^${skey}=" "$full_env" 2>/dev/null; then
+                        sed -i "s|^${skey}=.*|${skey}=${sval}|" "$full_env"
+                    else
+                        echo "${skey}=${sval}" >> "$full_env"
+                    fi
+                done < "$secrets_file"
+                log "merged secrets from ${secrets_file}"
+                break  # first match wins
+            fi
+        done
+
         log "generated ${full_env}"
     done
 }
