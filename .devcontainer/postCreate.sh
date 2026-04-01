@@ -117,7 +117,7 @@ fi
 
 # ─── Session orchestrator ────────────────────────────────────────────────────
 echo "==> Setting up session orchestrator"
-mkdir -p /workspace/sessions /workspace/repos "${HOME}/.local/bin"
+mkdir -p /workspace/sessions "${HOME}/.local/bin"
 ln -sf "$(pwd)/scripts/ws-session" "${HOME}/.local/bin/ws-session"
 
 # =============================================================================

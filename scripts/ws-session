@@ -15,7 +15,6 @@ set -euo pipefail
 # ── Constants ────────────────────────────────────────────────────────────────
 
 SESSIONS_DIR="/workspace/sessions"
-REPOS_DIR="/workspace/repos"
 REGISTRY="${SESSIONS_DIR}/registry.json"
 LOCKFILE="${SESSIONS_DIR}/.registry.lock"
 MAX_ID_LEN=20
@@ -39,7 +38,7 @@ require_cmd() {
 }
 
 ensure_dirs() {
-    mkdir -p "$SESSIONS_DIR" "$REPOS_DIR"
+    mkdir -p "$SESSIONS_DIR"
 }
 
 usage() {
@@ -756,42 +755,13 @@ cmd_create() {
     }
     trap cleanup_failed_create ERR
 
-    # Reference repo
-    local project_name ref_repo
-    project_name=$(basename "$project" .git)
-    ref_repo="${REPOS_DIR}/${project_name}"
-
-    if [ ! -d "$ref_repo" ]; then
-        log "cloning reference repo to ${ref_repo}..."
-        git clone "$project" "$ref_repo"
-        git -C "$ref_repo" config gc.auto 0
-    else
-        log "updating reference repo..."
-        git -C "$ref_repo" fetch --all --prune 2>/dev/null || warn "fetch failed (non-fatal)"
-    fi
-
-    # Clone session
+    # Clone project directly
     local session_dir="${SESSIONS_DIR}/${session_id}"
-    log "cloning session to ${session_dir}..."
-    git clone --reference "$ref_repo" "file://${ref_repo}" "$session_dir"
-
-    # Restore the real remote URL from the reference repo (clone sets it to file://)
-    local real_remote
-    real_remote=$(git -C "$ref_repo" remote get-url origin 2>/dev/null || true)
-    if [ -n "$real_remote" ] && [[ "$real_remote" != file://* ]]; then
-        git -C "$session_dir" remote set-url origin "$real_remote"
-    fi
+    log "cloning ${project} to ${session_dir}..."
+    git clone "$project" "$session_dir"
 
     if [ -n "$ref_branch" ]; then
         git -C "$session_dir" checkout "$ref_branch"
-    fi
-
-    # Copy .ws-sessions.yml from reference repo if not in clone (untracked in ref)
-    local ref_config="${ref_repo}/${WS_CONFIG}"
-    local session_config="${session_dir}/${WS_CONFIG}"
-    if [ -f "$ref_config" ] && [ ! -f "$session_config" ]; then
-        cp "$ref_config" "$session_config"
-        log "copied ${WS_CONFIG} from reference repo"
     fi
 
     # Load config and allocate ports
@@ -871,7 +841,6 @@ cmd_create() {
         --arg project "$project" \
         --argjson index "$session_index" \
         --arg repo_path "$session_dir" \
-        --arg reference_repo "$ref_repo" \
         --arg compose_project "$session_id" \
         --arg network "$session_network" \
         --arg status "$status" \
@@ -882,7 +851,6 @@ cmd_create() {
             project: $project,
             index: $index,
             repo_path: $repo_path,
-            reference_repo: $reference_repo,
             compose_project: $compose_project,
             network: $network,
             status: $status,
