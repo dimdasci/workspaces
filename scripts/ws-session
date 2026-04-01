@@ -484,7 +484,7 @@ inject_session_context() {
     local session_id="$1" session_dir="$2" ports_json="$3"
 
     local claude_dir="${session_dir}/.claude"
-    local context_file="${claude_dir}/session-context.md"
+    local context_file="${claude_dir}/CLAUDE.md"
     local hooks_dir="${claude_dir}/hooks"
     mkdir -p "$claude_dir" "$hooks_dir"
 
@@ -598,10 +598,8 @@ HOOKEOF
     local settings_file="${claude_dir}/settings.local.json"
     local settings_json
     settings_json=$(jq -n \
-        --arg prompt ".claude/session-context.md" \
         --arg hook_cmd ".claude/hooks/check-localhost.sh" \
         '{
-            appendSystemPromptFile: $prompt,
             hooks: {
                 PreToolUse: [
                     {
@@ -636,9 +634,12 @@ HOOKEOF
         echo "# ws-session generated files" >> "$exclude_file"
         echo ".session.env" >> "$exclude_file"
         echo "docker-compose.override.yml" >> "$exclude_file"
+        echo ".claude/CLAUDE.md" >> "$exclude_file"
+        echo ".claude/hooks/" >> "$exclude_file"
+        echo ".claude/settings.local.json" >> "$exclude_file"
     fi
 
-    log "injected session context into .claude/settings.local.json"
+    log "injected session context into .claude/CLAUDE.md"
 }
 
 # ── Docker Operations ────────────────────────────────────────────────────────
