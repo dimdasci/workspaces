@@ -775,6 +775,13 @@ cmd_create() {
     log "cloning session to ${session_dir}..."
     git clone --reference "$ref_repo" "file://${ref_repo}" "$session_dir"
 
+    # Restore the real remote URL from the reference repo (clone sets it to file://)
+    local real_remote
+    real_remote=$(git -C "$ref_repo" remote get-url origin 2>/dev/null || true)
+    if [ -n "$real_remote" ] && [[ "$real_remote" != file://* ]]; then
+        git -C "$session_dir" remote set-url origin "$real_remote"
+    fi
+
     if [ -n "$ref_branch" ]; then
         git -C "$session_dir" checkout "$ref_branch"
     fi
