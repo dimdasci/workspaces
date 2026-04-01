@@ -1078,6 +1078,16 @@ cmd_refresh() {
 
     [ -d "$session_dir" ] || die "session directory missing: $session_dir"
 
+    # Re-copy .ws-sessions.yml from shared config if available
+    local project_url
+    project_url=$(echo "$entry" | jq -r '.project')
+    local project_name
+    project_name=$(basename "$project_url" .git)
+    local shared_config="${CONFIGS_DIR}/${project_name}.yml"
+    if [ -f "$shared_config" ]; then
+        cp "$shared_config" "${session_dir}/${WS_CONFIG}"
+    fi
+
     # Save old override for comparison
     local old_override=""
     if [ -f "${session_dir}/docker-compose.override.yml" ]; then
