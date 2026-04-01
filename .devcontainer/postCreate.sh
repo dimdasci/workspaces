@@ -34,7 +34,17 @@ fi
 echo "==> Fixing Docker socket permissions"
 if [ -S /var/run/docker.sock ]; then
     DOCKER_GID=$(stat -c '%g' /var/run/docker.sock)
-    sudo groupmod -g "$DOCKER_GID" docker 2>/dev/null || true
+    CURRENT_DOCKER_GID=$(getent group docker | cut -d: -f3)
+    if [ "$DOCKER_GID" != "$CURRENT_DOCKER_GID" ]; then
+        # If another group already has the socket's GID, move it out of the way
+        BLOCKING_GROUP=$(getent group "$DOCKER_GID" | cut -d: -f1)
+        if [ -n "$BLOCKING_GROUP" ] && [ "$BLOCKING_GROUP" != "docker" ]; then
+            FREE_GID=990
+            while getent group "$FREE_GID" >/dev/null 2>&1; do FREE_GID=$((FREE_GID - 1)); done
+            sudo groupmod -g "$FREE_GID" "$BLOCKING_GROUP"
+        fi
+        sudo groupmod -g "$DOCKER_GID" docker
+    fi
     sudo usermod -aG docker "$(whoami)" 2>/dev/null || true
 fi
 
