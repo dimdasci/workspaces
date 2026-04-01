@@ -9,10 +9,11 @@ Standardized remote workspace running as a devcontainer on a remote Linux machin
 **Mac (local):**
 - DevPod: `brew install devpod`
 - pngpaste (clipboard image transfer): `brew install pngpaste`
-- SSH key at `~/.ssh/id_ed25519` — generate if missing: `ssh-keygen -t ed25519`
+- SSH key pair for the remote host (`.pem` from AWS or `id_ed25519`)
+- age key at `~/.age/key.txt` for chezmoi secret decryption
 
 **Remote machine:**
-- Ubuntu 22.04+ or Debian Bookworm
+- Ubuntu 22.04 (22.04 only — 24.04 has known issues with this setup)
 - SSH access with sudo privileges
 - Minimum: 4 GB RAM, 2 vCPU
 - Recommended: 8 GB+ RAM for headed Chromium
@@ -24,26 +25,56 @@ Standardized remote workspace running as a devcontainer on a remote Linux machin
 Run once per remote machine before creating any workspace.
 
 ```bash
-# Install Docker, configure sshd, create /workspace
+# Install Docker, configure sshd, mount storage at /workspace
+# VPS (local disk):
 ssh user@my-ec2 'curl -sSL https://raw.githubusercontent.com/dimdasci/workspaces/main/host-setup.sh | bash'
+# AWS EC2 with EBS (attach volume first, appears as /dev/nvme1n1 on Nitro):
+ssh user@my-ec2 'curl -sSL https://raw.githubusercontent.com/dimdasci/workspaces/main/host-setup.sh | bash -s -- --ebs /dev/nvme1n1'
 
-# Copy age key for chezmoi secret decryption
-scp ~/.age/key.txt user@my-ec2:~/.config/chezmoi/key.txt
-
-# Bootstrap chezmoi (dotfiles: shell config, tmux, etc.)
-ssh user@my-ec2 'chezmoi init --apply <github-username>'
+# Copy age key for chezmoi secret decryption (used inside the container)
+ssh user@my-ec2 'mkdir -p /workspace/.age'
+scp ~/.age/key.txt user@my-ec2:/workspace/.age/key.txt
 ```
 
 ---
 
 ## Creating a workspace
 
+Each workspace needs a named SSH provider. Create one per remote host:
+
 ```bash
-devpod provider add ssh        # once per Mac, skip if already added
-devpod up ./workspace --provider ssh --option HOST=my-ec2.example.com
+# Create a named provider (once per host)
+devpod provider add ssh --name my-ws
+
+# Configure it — HOST must include the username
+devpod provider set-options my-ws \
+  -o HOST=ubuntu@<elastic-ip> \
+  -o EXTRA_FLAGS="-o IdentitiesOnly=yes -i ~/.ssh/<key>.pem" \
+  -o AGENT_PATH="/tmp/$(whoami)/devpod/agent"
+
+# Create the workspace
+devpod up ./workspace --provider my-ws --id my-ws --ide none
 ```
 
-DevPod clones this repo into the remote host and starts the devcontainer. On first run this takes a few minutes for the image build.
+`HOST` must include `ubuntu@` (or whatever the SSH user is). Without it, DevPod uses your local username which won't match the remote host.
+
+On first run this takes a few minutes for the image build.
+
+---
+
+## First-time container setup
+
+Run once after the first `devpod up`. SSH into the container, authenticate GitHub, then run the post-auth setup:
+
+```bash
+ssh my-ws.devpod
+
+# Inside the container (working dir is /workspaces/<ws-name>):
+gh auth login
+bash .devcontainer/postAuth.sh
+```
+
+`postAuth.sh` initializes chezmoi (clones dotfiles from private repo) and sets up symlinks. On subsequent `devpod up --recreate`, `postCreate.sh` handles this automatically — chezmoi source and gh token persist on `/workspace`.
 
 ---
 
@@ -109,25 +140,34 @@ Replace `ec2-ws` with your workspace name. Pick any free local port for VNC. For
 
 ## Container resources
 
-Container memory and shared memory are configurable via environment variables on the remote host:
+`host-setup.sh` auto-calculates memory limits based on the host's total RAM and writes them to `/etc/profile.d/workspace-resources.sh`. The devcontainer reads these on startup.
 
-| Variable | Default | Purpose |
+| Variable | How it's set | Purpose |
 |---|---|---|
-| `WORKSPACE_MEMORY` | `12g` | Container memory limit |
-| `WORKSPACE_SHM` | `2g` | Shared memory size |
+| `WORKSPACE_MEMORY` | 75% of (total - 2GB reserved) | Container memory limit |
+| `WORKSPACE_SHM` | 25% of workspace memory, min 2GB | Shared memory size |
+
+Override by editing `/etc/profile.d/workspace-resources.sh` on the host.
 
 ---
 
 ## Multiple workspaces
 
-Each workspace is an independent DevPod environment, optionally on different hosts:
+Each workspace is an independent DevPod environment with its own named provider, optionally on different hosts:
 
 ```bash
-devpod up ./workspace --provider ssh --option HOST=vps1 --id work-1
-devpod up ./workspace --provider ssh --option HOST=vps2 --id work-2
+# Create a provider per host (see "Creating a workspace" for full setup)
+devpod provider add ssh --name work-1
+devpod provider set-options work-1 -o HOST=ubuntu@<host-1> -o EXTRA_FLAGS="..." -o AGENT_PATH="..."
 
-devpod ssh work-1
-devpod ssh work-2
+devpod provider add ssh --name work-2
+devpod provider set-options work-2 -o HOST=ubuntu@<host-2> -o EXTRA_FLAGS="..." -o AGENT_PATH="..."
+
+devpod up ./workspace --provider work-1 --id work-1 --ide none
+devpod up ./workspace --provider work-2 --id work-2 --ide none
+
+ssh work-1.devpod
+ssh work-2.devpod
 ```
 
 No port conflicts — container ports are not published to the host. DevPod tunnels all traffic through the host's SSH port (22).
@@ -314,11 +354,11 @@ If the project's compose file uses default names (no explicit `container_name:`,
 ```bash
 devpod delete work-1
 
-# Recreate on the same or a different host
-devpod up ./workspace --provider ssh --option HOST=new-host --id work-1
+# Recreate using the existing provider
+devpod up ./workspace --provider work-1 --id work-1 --ide none
 ```
 
-The container is stateless. `/workspace` on the host is not touched by `devpod delete`. All project files, `.claude/`, and git repos survive the rebuild.
+The container is stateless. `/workspace` on the host is not touched by `devpod delete`. All project files, `.claude/`, gh auth, chezmoi source, and git repos survive the rebuild. No need to re-run `gh auth login` or `postAuth.sh` after recreate.
 
 ---
 
@@ -326,27 +366,50 @@ The container is stateless. `/workspace` on the host is not touched by `devpod d
 
 | Layer | What persists |
 |---|---|
-| `/workspace` on host | project files, `.claude/`, git repos, `.clipboard/` |
+| `/workspace` on host | project files, `.claude/`, git repos, `.clipboard/`, `.config/gh/`, `.chezmoi-source/`, `.age/` |
 | Container | nothing — ephemeral, rebuilt on `devpod up` |
 | Tool caches | lost on rebuild (npm, pip, go module caches) |
 
-**AWS EC2**: attach EFS and mount at `/workspace` before running `host-setup.sh`. Add to `/etc/fstab`:
+**AWS EC2 with EBS** (recommended): create a gp3 volume in the same AZ as the instance, attach it, then pass it to `host-setup.sh`:
 
+```bash
+# From your local machine (or AWS console):
+# 1. Create volume in the same AZ as your instance
+aws ec2 create-volume --availability-zone <az> --size 64 --volume-type gp3 \
+  --tag-specifications 'ResourceType=volume,Tags=[{Key=Name,Value=<name>-data}]'
+
+# 2. Attach to instance (appears as /dev/nvme1n1 on Nitro instances)
+aws ec2 attach-volume --volume-id vol-xxx --instance-id i-xxx --device /dev/sdf
+
+# 3. Run host-setup with --ebs flag (formats XFS with reflink support, adds to fstab)
+bash host-setup.sh --ebs /dev/nvme1n1
 ```
-fs-xxx.efs.region.amazonaws.com:/ /workspace efs _netdev,tls 0 0
+
+XFS with `reflink=1` enables copy-on-write for `cp --reflink` and `git clone --reference`, keeping multi-agent session clones disk-efficient. The volume persists independently of the instance — set `DeleteOnTermination: false` to keep data across instance replacements.
+
+**AWS EC2 with EFS**: for shared storage across multiple instances. Pass the filesystem ID to `host-setup.sh`:
+
+```bash
+bash host-setup.sh --efs fs-xxx us-east-1
 ```
 
-Install the utils first: `sudo apt-get install -y amazon-efs-utils`
+This installs `amazon-efs-utils` from source and adds the NFS mount to `/etc/fstab`.
 
-**VPS**: local disk at `/workspace` — persists across rebuilds, lost if you wipe the VPS.
+**VPS**: local disk at `/workspace` — persists across rebuilds, lost if you wipe the VPS. Run `host-setup.sh` without flags.
 
 ---
 
 ## AWS-specific setup
 
+### EBS
+
+Create a gp3 volume in the same AZ as your EC2 instance. Attach it before running `host-setup.sh --ebs <device>`. The script formats it as XFS with reflink support and mounts at `/workspace`.
+
+To keep the volume across instance termination, set `DeleteOnTermination: false` on the attachment (the default when attaching via CLI). The launch template's root volume has `DeleteOnTermination: true` — this is intentional; the root disk is stateless.
+
 ### EFS
 
-Create the filesystem in the same VPC and availability zone as your EC2 instance. Add the mount entry to `/etc/fstab` (see above) before running `host-setup.sh` so `/workspace` is mounted when the container starts.
+Create the filesystem in the same VPC and availability zone as your EC2 instance. Run `host-setup.sh --efs <fs-id> <region>` — it handles efs-utils installation, fstab entry, and mount.
 
 ### IAM instance profile
 
@@ -356,8 +419,8 @@ Attach an IAM role to the EC2 instance with required permissions. The AWS CLI in
 
 ## Security
 
-- **Firewall**: port 22 (SSH) only — container ports are not published, accessed via DevPod tunnel.
-- **SSH**: key-only auth, no password login, no root login, fail2ban active after `host-setup.sh`.
+- **Firewall**: AWS security group or VPS provider firewall. No ufw on the host — it conflicts with Docker's iptables rules.
+- **SSH**: key-only auth, no password login, no root login (enforced by `host-setup.sh`).
 - **Secrets**: managed via chezmoi + age encryption. No secrets committed to this repo.
 
 ---

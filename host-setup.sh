@@ -39,7 +39,7 @@ done
 # 1. Docker
 # -----------------------------------------------------------------------------
 echo "$BANNER"
-echo ">>> [1/9] Docker"
+echo ">>> [1/7] Docker"
 echo "$BANNER"
 
 if command -v docker &>/dev/null; then
@@ -62,7 +62,7 @@ fi
 # 2. Persistent storage
 # -----------------------------------------------------------------------------
 echo "$BANNER"
-echo ">>> [2/9] Persistent storage (/workspace)"
+echo ">>> [2/7] Persistent storage (/workspace)"
 echo "$BANNER"
 
 if [ -d /workspace ]; then
@@ -80,7 +80,7 @@ if [ -n "$EBS_DEVICE" ]; then
     fi
 
     # Format as XFS with reflinks if not already formatted
-    FS_TYPE=$(blkid -o value -s TYPE "$EBS_DEVICE" 2>/dev/null || true)
+    FS_TYPE=$(sudo blkid -o value -s TYPE "$EBS_DEVICE" 2>/dev/null || true)
     if [ -z "$FS_TYPE" ]; then
         echo "  formatting $EBS_DEVICE as XFS with reflink support ..."
         sudo mkfs.xfs -m reflink=1 "$EBS_DEVICE"
@@ -89,7 +89,7 @@ if [ -n "$EBS_DEVICE" ]; then
     fi
 
     # Get UUID for stable fstab entry (device names change across reboots)
-    EBS_UUID=$(blkid -o value -s UUID "$EBS_DEVICE")
+    EBS_UUID=$(sudo blkid -o value -s UUID "$EBS_DEVICE")
     if [ -z "$EBS_UUID" ]; then
         echo "  ERROR: cannot determine UUID for $EBS_DEVICE" >&2
         exit 1
@@ -141,7 +141,7 @@ sudo chown -R 1000:1000 /workspace
 # 3. chezmoi
 # -----------------------------------------------------------------------------
 echo "$BANNER"
-echo ">>> [3/9] chezmoi"
+echo ">>> [3/7] chezmoi"
 echo "$BANNER"
 
 if [ -x /usr/local/bin/chezmoi ]; then
@@ -155,7 +155,7 @@ fi
 # 4. age
 # -----------------------------------------------------------------------------
 echo "$BANNER"
-echo ">>> [4/9] age"
+echo ">>> [4/7] age"
 echo "$BANNER"
 
 if command -v age &>/dev/null; then
@@ -166,53 +166,15 @@ else
 fi
 
 # -----------------------------------------------------------------------------
-# 5. Firewall (ufw)
+# 5. SSH hardening
 # -----------------------------------------------------------------------------
 echo "$BANNER"
-echo ">>> [5/9] Firewall (ufw)"
+echo ">>> [5/7] SSH hardening"
 echo "$BANNER"
 
-if ! command -v ufw &>/dev/null; then
-    echo "  ufw not found, installing ..."
-    sudo apt-get install -y ufw
-fi
-
-echo "  configuring ufw rules ..."
-sudo ufw default deny incoming
-sudo ufw default allow outgoing
-sudo ufw allow 22/tcp   comment 'host SSH'
-# Container ports (SSH, KasmVNC) are accessed via DevPod tunnel — no firewall rules needed
-
-echo "  enabling ufw (force) ..."
-sudo ufw --force enable
-
-echo "  ufw status:"
-sudo ufw status verbose
-
-# -----------------------------------------------------------------------------
-# 6. fail2ban
-# -----------------------------------------------------------------------------
-echo "$BANNER"
-echo ">>> [6/9] fail2ban"
-echo "$BANNER"
-
-if command -v fail2ban-server &>/dev/null; then
-    echo "  fail2ban already installed, skipping apt install"
-else
-    echo "  installing fail2ban ..."
-    sudo apt-get install -y fail2ban
-fi
-
-echo "  enabling and starting fail2ban ..."
-sudo systemctl enable fail2ban
-sudo systemctl start fail2ban
-
-# -----------------------------------------------------------------------------
-# 7. SSH hardening
-# -----------------------------------------------------------------------------
-echo "$BANNER"
-echo ">>> [7/9] SSH hardening"
-echo "$BANNER"
+# Firewall is handled by AWS security groups (or VPS provider firewall).
+# ufw is intentionally NOT installed — it conflicts with Docker's iptables
+# rules and has caused SSH lockouts on EC2.
 
 SSHD_CONF=/etc/ssh/sshd_config
 
@@ -235,8 +197,6 @@ apply_sshd_setting PermitRootLogin no
 apply_sshd_setting PasswordAuthentication no
 
 echo "  restarting ssh ..."
-# Ubuntu 24.04+ uses socket activation (ssh.socket); older versions use ssh.service/sshd.service.
-# Restarting ssh.service alone kills the socket listener — must restart ssh.socket too.
 if systemctl is-active ssh.socket &>/dev/null; then
     sudo systemctl restart ssh.socket
     sudo systemctl restart ssh.service 2>/dev/null || true
@@ -248,7 +208,7 @@ fi
 # 8. Docker memory limits
 # -----------------------------------------------------------------------------
 echo "$BANNER"
-echo ">>> [8/9] Docker memory limits"
+echo ">>> [6/7] Docker memory limits"
 echo "$BANNER"
 
 TOTAL_MEM_KB=$(grep MemTotal /proc/meminfo | awk '{print $2}')
@@ -278,7 +238,7 @@ echo "  written to $ENVFILE"
 # 9. Elastic IP reminder (AWS only)
 # -----------------------------------------------------------------------------
 echo "$BANNER"
-echo ">>> [9/9] Elastic IP check"
+echo ">>> [7/7] Elastic IP check"
 echo "$BANNER"
 
 if [ -n "$EFS_ID" ]; then
@@ -297,7 +257,6 @@ echo ">>> host-setup complete"
 echo "$BANNER"
 echo ""
 echo "Next steps:"
-echo "  1. Copy your age key:  scp ~/.age/key.txt user@host:~/.config/chezmoi/key.txt"
-echo "  2. Bootstrap chezmoi:  chezmoi init --apply <your-github-username>"
-echo "  3. Deploy workspace:   devpod up github.com/<user>/workspaces --provider <ws-name> --id <ws-name> --ide none"
+echo "  1. Copy age key:  ssh user@host 'mkdir -p /workspace/.age' && scp ~/.age/key.txt user@host:/workspace/.age/key.txt"
+echo "  2. Deploy workspace:  devpod up ./workspace --provider ssh --option HOST=user@host --id <ws-name> --ide none"
 echo ""

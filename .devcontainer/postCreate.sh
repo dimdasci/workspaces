@@ -3,9 +3,11 @@ set -euo pipefail
 
 # Ensure ~/.local/bin is in PATH (claude, chezmoi, opencode install here)
 export PATH="${HOME}/.local/bin:${PATH}"
-if ! grep -q '\.local/bin' "${HOME}/.profile" 2>/dev/null; then
-    echo 'export PATH="${HOME}/.local/bin:${PATH}"' >> "${HOME}/.profile"
-fi
+for rc in "${HOME}/.profile" "${HOME}/.bashrc"; do
+    if ! grep -q '\.local/bin' "$rc" 2>/dev/null; then
+        echo 'export PATH="${HOME}/.local/bin:${PATH}"' >> "$rc"
+    fi
+done
 
 # ─── Pull latest source (DevPod caches the repo clone, doesn't update) ───────
 # Bash reads scripts by byte offset, not line number. git pull can replace this
@@ -14,6 +16,11 @@ fi
 # from the start.
 if [ "${_POSTCREATE_UPDATED:-0}" = "0" ]; then
     echo "==> Pulling latest source"
+    # DevPod may clone via SSH but container has no SSH keys — switch to HTTPS
+    if git remote get-url origin 2>/dev/null | grep -q 'git@github.com:'; then
+        HTTPS_URL=$(git remote get-url origin | sed 's|git@github.com:|https://github.com/|')
+        git remote set-url origin "$HTTPS_URL"
+    fi
     git pull --ff-only 2>/dev/null || echo "WARN: git pull failed (non-fatal)"
     echo "==> Re-executing updated postCreate.sh"
     exec env _POSTCREATE_UPDATED=1 bash -l "$0"
@@ -180,13 +187,14 @@ encryption = "age"
     recipient = "age1fxdg538s8gg9dfr59p5a4clek2r8x09xv2df3n97jnpj9387ud0q2zpq0z"
 CHEZEOF
 
-    # If source exists (EFS), just apply; otherwise init from repo
-    if [ -d /workspace/.chezmoi-source ]; then
+    # Apply chezmoi if source exists (from a previous init). First-time init
+    # requires gh auth and must be done manually after container creation.
+    if [ -d /workspace/.chezmoi-source/.git ]; then
         echo "==> Applying chezmoi (existing source)"
         ~/.local/bin/chezmoi apply 2>/dev/null || echo "WARN: chezmoi apply failed (non-fatal)"
     else
-        echo "==> Initializing chezmoi from repo"
-        ~/.local/bin/chezmoi init dimdasci/stuff --source /workspace/.chezmoi-source --apply 2>/dev/null || echo "WARN: chezmoi init failed (non-fatal, run manually)"
+        echo "==> Chezmoi source not found. After 'gh auth login', run:"
+        echo "     chezmoi init dimdasci/stuff --source /workspace/.chezmoi-source --apply"
     fi
 
     # Symlinks for chezmoi-managed dirs (must run after chezmoi apply)
