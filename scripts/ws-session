@@ -15,6 +15,7 @@ set -euo pipefail
 # ── Constants ────────────────────────────────────────────────────────────────
 
 SESSIONS_DIR="/workspace/sessions"
+CONFIGS_DIR="/workspace/.ws-sessions"
 REGISTRY="${SESSIONS_DIR}/registry.json"
 LOCKFILE="${SESSIONS_DIR}/.registry.lock"
 MAX_ID_LEN=20
@@ -22,7 +23,6 @@ ID_REGEX='^[a-z][a-z0-9-]*$'
 PORT_STRIDE=100
 PORT_MAX_BUMP=10
 WS_CONFIG=".ws-sessions.yml"
-SESSION_CONTEXT_FILE=".claude/session-context.md"
 
 # ── Utilities ────────────────────────────────────────────────────────────────
 
@@ -762,6 +762,18 @@ cmd_create() {
 
     if [ -n "$ref_branch" ]; then
         git -C "$session_dir" checkout "$ref_branch"
+    fi
+
+    # Copy .ws-sessions.yml if not in repo — check /workspace/.ws-sessions/<project>.yml
+    local session_config="${session_dir}/${WS_CONFIG}"
+    if [ ! -f "$session_config" ]; then
+        local project_name
+        project_name=$(basename "$project" .git)
+        local shared_config="${CONFIGS_DIR}/${project_name}.yml"
+        if [ -f "$shared_config" ]; then
+            cp "$shared_config" "$session_config"
+            log "copied ${WS_CONFIG} from ${shared_config}"
+        fi
     fi
 
     # Load config and allocate ports
