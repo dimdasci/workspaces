@@ -631,7 +631,9 @@ HOOKEOF
     mkdir -p "$(dirname "$exclude_file")"
     if ! grep -q "ws-session" "$exclude_file" 2>/dev/null; then
         echo "# ws-session generated files" >> "$exclude_file"
+        echo ".ws-sessions.yml" >> "$exclude_file"
         echo ".session.env" >> "$exclude_file"
+        echo ".env.shared" >> "$exclude_file"
         echo "docker-compose.override.yml" >> "$exclude_file"
         echo ".claude/CLAUDE.md" >> "$exclude_file"
         echo ".claude/hooks/" >> "$exclude_file"
