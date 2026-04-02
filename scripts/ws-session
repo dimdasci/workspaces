@@ -73,6 +73,9 @@ Commands:
   env <id>
       Print session environment variables.
 
+  peers start|stop|status
+      Manage the claude-peers-mcp broker for inter-agent messaging.
+
 EOF
 }
 
@@ -1192,6 +1195,43 @@ cmd_env() {
     cat "$env_file"
 }
 
+# ── Subcommand: peers ────────────────────────────────────────────────────────
+
+cmd_peers() {
+    local action="${1:-}"
+    local peers_dir="/workspace/.tools/claude-peers-mcp"
+
+    case "$action" in
+        start)
+            [ -d "$peers_dir" ] || die "claude-peers-mcp not found at ${peers_dir}"
+            command -v bun >/dev/null 2>&1 || die "bun not found"
+            if pgrep -f "claude-peers-mcp/broker" >/dev/null 2>&1; then
+                log "broker already running (pid $(pgrep -f 'claude-peers-mcp/broker'))"
+            else
+                nohup bun "${peers_dir}/broker.ts" > /tmp/claude-peers-broker.log 2>&1 &
+                log "started broker (pid $!), log: /tmp/claude-peers-broker.log"
+            fi
+            ;;
+        stop)
+            if pkill -f "claude-peers-mcp/broker" 2>/dev/null; then
+                log "broker stopped"
+            else
+                log "broker not running"
+            fi
+            ;;
+        status)
+            if pgrep -f "claude-peers-mcp/broker" >/dev/null 2>&1; then
+                echo "broker running (pid $(pgrep -f 'claude-peers-mcp/broker'))"
+            else
+                echo "broker not running"
+            fi
+            ;;
+        *)
+            die "usage: ws-session peers start|stop|status"
+            ;;
+    esac
+}
+
 # ── Main ─────────────────────────────────────────────────────────────────────
 
 main() {
@@ -1211,6 +1251,7 @@ main() {
         shell)    cmd_shell "$@" ;;
         exec)     cmd_exec "$@" ;;
         env)      cmd_env "$@" ;;
+        peers)    cmd_peers "$@" ;;
         help|-h|--help) usage ;;
         "")       usage ;;
         *)        die "unknown command: $cmd (try: ws-session help)" ;;
