@@ -66,6 +66,12 @@ done
 touch /workspace/.gitconfig
 ln -sf /workspace/.gitconfig "${HOME}/.gitconfig"
 
+# Claude Code skills — persist on /workspace so they survive rebuilds
+if [ -d /workspace/.claude/skills ]; then
+    rm -rf "${HOME}/.claude/skills"
+    ln -sf /workspace/.claude/skills "${HOME}/.claude/skills"
+fi
+
 # Bash aliases — persistent on /workspace, sourced by default .bashrc
 if [ -f /workspace/.bash_aliases ]; then
     ln -sf /workspace/.bash_aliases "${HOME}/.bash_aliases"
