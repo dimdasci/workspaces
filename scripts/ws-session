@@ -308,12 +308,13 @@ generate_compose_override() {
     local services_block="" volumes_block="" networks_block=""
     local svc container_name
 
-    # Services: remap container_name
+    # Services: remap container_name, remove host port bindings
     for svc in $(config_services "$session_dir"); do
         container_name=$(config_service_container_name "$session_dir" "$svc")
         if [ -z "$container_name" ]; then continue; fi
         services_block+="  ${svc}:
     container_name: ${session_id}-${container_name}
+    ports: []
 "
         # Check if this service has a build: directive — add image: to prevent tag collision
         local has_build
