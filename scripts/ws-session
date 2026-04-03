@@ -314,7 +314,7 @@ generate_compose_override() {
         if [ -z "$container_name" ]; then continue; fi
         services_block+="  ${svc}:
     container_name: ${session_id}-${container_name}
-    ports: []
+    ports: !override []
 "
         # Check if this service has a build: directive — add image: to prevent tag collision
         local has_build
